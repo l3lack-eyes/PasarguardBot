@@ -1,0 +1,133 @@
+"""Text templates for admin settings_payment."""
+
+GATEWAY_SETTINGS_TRIGGER = "💳 تنظیمات درگاه"
+
+CARD_HOLDER_NOT_SET = "تنظیم نشده"
+CARD_NOT_REGISTERED = "ثبت نشده"
+
+RANDOM_MODE_ACTIVE = "✅ فعال (کارت‌ها به صورت رندوم نمایش داده می‌شوند)"
+RANDOM_MODE_INACTIVE = "❌ غیرفعال (کارت فعال نمایش داده می‌شود)"
+
+CARD_NAME_PROMPT = "نام دارنده کارت را ارسال کنید:"
+CARD_ADDED_SUCCESS = "کارت جدید با موفقیت اضافه شد."
+MANUAL_MIN_PROMPT = "حداقل مبلغ کارت دستی را وارد کنید:"
+MANUAL_MAX_PROMPT = "حداکثر مبلغ کارت دستی را وارد کنید:"
+CRYPTO_MIN_PROMPT = "حداکثر مبلغ درگاه ارزی را وارد کنید:"
+CRYPTO_MAX_PROMPT = "حداکثر مبلغ درگاه ارزی را وارد کنید:"
+NUMERIC_ONLY = "لطفا فقط عدد ارسال کنید"
+PERCENT_RANGE_ERROR = "درصد باید بین 0 تا 100 باشد"
+
+MANUAL_LIMITS_SAVED = "✅ محدودیت کارت دستی ذخیره شد"
+CRYPTO_LIMITS_SAVED = "✅ محدودیت درگاه ارزی ذخیره شد"
+
+MAAR_ADD_MIN_PROMPT = "حداقل تراکنش موفق:"
+MAAR_ADD_MAX_PROMPT = "حداکثر تراکنش موفق (عدد یا none):"
+MAAR_ADD_DELAY_PROMPT = "زمان تایید (دقیقه، 0=دستی):"
+MAAR_NUMERIC_OR_NONE = "عدد یا none"
+MAAR_NUMERIC_ONLY = "فقط عدد"
+MAAR_SAVED = "✅ ذخیره شد"
+MAAR_NOT_FOUND = "یافت نشد"
+MAAR_MANUAL_ONLY = "فقط دستی"
+
+ADD_CARD_NUMBER_PROMPT = "شماره کارت جدید را ارسال کنید:"
+SELECT_ACTIVE_CARD_PROMPT = "کارت مورد نظر را انتخاب کنید:"
+NO_CARDS_REGISTERED = "هیچ کارتی ثبت نشده است."
+ACTIVE_CARD_UPDATED = "کارت فعال بروزرسانی شد."
+DELETE_CARD_PROMPT = "کارت مورد نظر را حذف کنید:"
+CARD_DELETED = "کارت حذف شد."
+SETTINGS_SAVED = "وضعیت جدید ذخیره شد"
+
+MANUAL_BONUS_PERCENT_PROMPT = "درصد بونوس کارت دستی را وارد کنید (0-100):"
+CRYPTO_BONUS_PERCENT_PROMPT = "درصد بونوس ارزی را وارد کنید (0-100):"
+
+MANUAL_BONUS_SET_TEMPLATE = "✅ درصد بونوس کارت دستی روی {percent}% تنظیم شد\n\n{bonus_text}"
+CRYPTO_BONUS_SET_TEMPLATE = "✅ درصد بونوس ارزی روی {percent}% تنظیم شد\n\n{bonus_text}"
+
+MAAR_EDIT_VALUE_PROMPT = "مقدار جدید را بفرستید:"
+
+TX_ALREADY_REVIEWED = "این تراکنش قبلا بررسی شده است"
+TX_INVALID_AMOUNT = "❌ مبلغ نامعتبر است"
+TX_INVALID_REQUEST = "❌ خطا در پردازش درخواست"
+
+TX_APPROVED_ADMIN_HEADER = "✅ تراکنش تایید شد."
+TX_REJECTED_ADMIN_HEADER = "❌ تراکنش رد شد."
+TX_APPROVED_ADMIN_BUTTON = "🌟 تراکنش توسط ادمین تایید شده"
+TX_REJECTED_ADMIN_BUTTON = "⛔️ تراکنش توسط ادمین رد شد ⛔️"
+
+TX_REJECT_USER_MESSAGE = (
+    "#اطلاعیه\n"
+    "🚫 کاربر گرامی تراکنش کارت به کارت شما توسط پشتیبانی رد شد.\n\n"
+    "❕لطفا به مبلغی که وارد میکنید دقت کنید و حتما به هزارتومان تایپ کنید. برای مثال جهت تایید مبلغ 50,000 تومان باید عدد 50000 را به ربات ارسال کنید.\n\n"
+    "⚠️ لطفا مراحلی که رفته بودید را یکبار چک کنید سپس دوباره از ابتدا سعی کنید تا بررسی شود."
+)
+
+
+def gateway_settings_message(manual_info: str, random_mode_status: str, settings) -> str:
+    return (
+        "💳 **کارت فعال برای کارت به کارت دستی**:\n"
+        f"{manual_info}\n"
+        f"🎲 **حالت نمایش کارت**: {random_mode_status}\n\n"
+        "روی گزینه های زیر کلیک کنید برای تغییرات"
+    )
+
+
+def gateway_settings_back_message(active, random_mode_status: str, settings) -> str:
+    return (
+        "💳 **شماره کارت ست شده برای کارت به کارت دستی**:\n"
+        f"👤 **نام دارنده کارت**: `{active.name if (active and active.name) else CARD_HOLDER_NOT_SET}`\n"
+        f"📄 **شماره کارت**:\n `{active.number if (active and active.number) else CARD_HOLDER_NOT_SET}`\n"
+        f"🎲 **حالت نمایش کارت**: {random_mode_status}\n\n"
+        "روی گزینه های زیر کلیک کنید برای تغییرات"
+    )
+
+
+def manual_card_info(active) -> str:
+    if active:
+        return f"👤 **نام دارنده کارت**: `{active.name}`\n📄 **شماره کارت:** `{active.number}`"
+    return CARD_NOT_REGISTERED
+
+
+def bonus_settings_header(settings) -> str:
+    return (
+        "🎁 **تنظیمات بونوس درصدی**\n\n"
+        f"💳 **کارت دستی**: {settings.manual_bonus_percent}% {'✅ فعال' if settings.manual_bonus_enabled else '❌ غیرفعال'}\n"
+        f"💵 **ارزی**: {settings.crypto_bonus_percent}% {'✅ فعال' if settings.crypto_bonus_enabled else '❌ غیرفعال'}\n\n"
+        "روی گزینه‌های زیر کلیک کنید:"
+    )
+
+
+def maar_menu_header(master_status: str) -> str:
+    return f"📋 **قوانین تایید خودکار**\n🔘 کلی: {master_status}\n"
+
+
+MAAR_NO_RULES = "\nقانونی ثبت نشده."
+
+
+def maar_range(rule) -> str:
+    max_value = str(rule.max_successful_tx) if rule.max_successful_tx is not None else "∞"
+    return f"{rule.min_successful_tx}–{max_value}"
+
+
+def maar_delay(rule) -> str:
+    return MAAR_MANUAL_ONLY if rule.auto_approve_delay_minutes <= 0 else f"{rule.auto_approve_delay_minutes} دقیقه"
+
+
+def maar_rule_detail(rule_id: int, rule) -> str:
+    max_value = str(rule.max_successful_tx) if rule.max_successful_tx is not None else "∞"
+    return (
+        f"قانون #{rule_id}\nحداقل: {rule.min_successful_tx}\nحداکثر: {max_value}\nزمان: {maar_delay(rule)}\n"
+        f"وضعیت: {'فعال' if rule.is_active else 'غیرفعال'}"
+    )
+
+
+def tx_approved_user_message(user_id, amount: int, bonus: int, bonus_percent: int, total: int) -> str:
+    message = (
+        f"**✅ تراکنش کارت به کارت (دستی) شما تایید شد**\n\n"
+        f"👤 **شناسه شما:** `{user_id}`\n"
+        f"💰 مبلغ `{amount:,}` تومان به حساب شما اضافه شد.\n"
+    )
+    if bonus > 0:
+        message += f"🎁 بونوس: +{bonus:,} ({bonus_percent}%)\n"
+        message += f"💰 مجموع: {total:,} تومان\n"
+    message += "👜 موجودی شما به کیف پولتون در بات اضافه شده\n💡 اکنون می‌توانید از ربات خرید کنید."
+    return message
