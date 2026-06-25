@@ -19,13 +19,13 @@ from telethon import Button
 from telethon.errors import MessageNotModifiedError
 from telethon.tl.types import KeyboardButtonCallback
 
-from config import GITHUB_TOKEN
 from app import Kenzo
 from app.db.crud.app_files import AppFileManager
 from app.db.crud.help_buttons import HelpDownloadAppCRUD
 from app.db.crud.log_channels import LogChannelManager
 from app.logger import get_logger
 from app.telegram.keyboards.common import _help_button_style
+from config import GITHUB_TOKEN
 
 logger = get_logger(__name__)
 

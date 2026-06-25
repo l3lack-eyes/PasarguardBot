@@ -384,6 +384,70 @@ def _revenue_text(payload: dict) -> str:
     return "\n".join(lines)
 
 
+async def _services_payload(period: str, force: bool = False) -> dict:
+    async def _produce() -> dict:
+        period_range = _stats_period_range(period)
+        stats = await service_crud.get_period_stats(
+            period_range["start_ts"],
+            period_range["end_ts"],
+        )
+        return {
+            "updated_at": _now_utc().isoformat(),
+            "period": period,
+            "range": period_range,
+            "stats": stats,
+        }
+
+    return await _cached_json(f"stats:services:{period}", _produce, force=force)
+
+
+def _services_text(payload: dict) -> str:
+    s = payload["stats"]
+    period = payload.get("period", "1d")
+    updated_at = _to_datetime(payload.get("updated_at"))
+    label = REVENUE_PERIODS.get(period, period)
+
+    lines = [
+        f"📡 {bold('آمار سرویس‌ها')} — {label}",
+        "",
+        f"📊 {bold('کل سرویس‌ها')}",
+        f"📦 {bold('کل:')} {code(f'{s["total"]:,}')} · ✅ {bold('فعال:')} {code(f'{s["active"]:,}')} · ⛔ {bold('غیرفعال:')} {code(f'{s["disabled"]:,}')}",
+        "",
+        f"🆕 {bold('ساخته‌شده در بازه')}",
+        f"💎 {bold('پولی:')} {code(f'{s["paid_period"]:,}')} · 🧪 {bold('تست:')} {code(f'{s["test_period"]:,}')}",
+        "",
+        f"📈 {bold('انواع سرویس (کل)')}",
+        f"💎 {bold('پولی:')} {code(f'{s["paid_total"]:,}')} · 🧪 {bold('تست:')} {code(f'{s["test_total"]:,}')}",
+        f"💾 {bold('حجم کل:')} {code(_fmt_bytes(s['total_volume_bytes']))}",
+        "",
+        f"⏰ {bold('انقضا')}",
+        f"⚠️ {bold('۳ روز آینده:')} {code(f'{s["expiring_3d"]:,}')} · 📅 {bold('۷ روز آینده:')} {code(f'{s["expiring_7d"]:,}')} · ❌ {bold('منقضی:')} {code(f'{s["expired"]:,}')}",
+    ]
+
+    if s.get("top_panels"):
+        lines.append("")
+        lines.append(f"🏆 {bold('پرترداف پنل‌ها (بازه)')}")
+        for name, cnt in s["top_panels"]:
+            lines.append(f"• {bold(name)}: {code(f'{cnt:,}')}")
+
+    if s.get("top_volumes"):
+        lines.append("")
+        lines.append(f"📦 {bold('پرفروش‌ترین حجم‌ها (بازه)')}")
+        for vol_label, cnt in s["top_volumes"]:
+            lines.append(f"• {bold(vol_label)}: {code(f'{cnt:,}')}")
+
+    cache_line = _format_cache_meta(payload)
+    if cache_line:
+        lines.extend(["", cache_line])
+    lines.extend(
+        [
+            "",
+            f"🕒 {bold('آخرین بروزرسانی:')} {code(_fmt_updated(updated_at))}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 async def _system_payload(force: bool = False) -> dict:
     async def _produce() -> dict:
         settings = await SettingsManager().get_settings()
