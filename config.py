@@ -29,6 +29,7 @@ def optional_int(value: str) -> int | None:
 API_ID = config("API_ID")
 API_HASH = config("API_HASH")
 BOT_TOKEN = config("BOT_TOKEN")
+TELETHON_SESSION_PATH = config("TELETHON_SESSION_PATH", default="KenzoSession")
 ADMIN_ID: list = config("ADMIN_ID", cast=lambda v: [int(i) for i in v.split(",")])
 LOG_CHANNEL = config("LOG_CHANNEL", cast=optional_int, default=None)
 SQLALCHEMY_DATABASE_URL = config("SQLALCHEMY_DATABASE_URL")

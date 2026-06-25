@@ -5,32 +5,31 @@ services:
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+      - "127.0.0.1:6161:6379"
     volumes:
-      - redis_data:/data
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 10
+    networks:
+      - pasarguardbot
 
   mariadb:
     image: mariadb:11
     container_name: pasarguardbot-mariadb
     restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-      MARIADB_DATABASE: ${MARIADB_DATABASE}
-      MARIADB_USER: ${MARIADB_USER}
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    env_file:
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/.env
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --skip-character-set-client-handshake
     ports:
-      - "127.0.0.1:${MARIADB_HOST_PORT:-3131}:3306"
+      - "127.0.0.1:6162:3306"
     volumes:
-      - mariadb_data:/var/lib/mysql
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/data/mariadb:/var/lib/mysql
     healthcheck:
       test:
         [
@@ -41,6 +40,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+    networks:
+      - pasarguardbot
 
   phpmyadmin:
     image: phpmyadmin:5-apache
@@ -52,10 +53,35 @@ services:
     environment:
       PMA_HOST: mariadb
       PMA_PORT: 3306
-      UPLOAD_LIMIT: ${PHPMYADMIN_UPLOAD_LIMIT:-256M}
+      UPLOAD_LIMIT: 256M
     ports:
-      - "127.0.0.1:${PHPMYADMIN_HOST_PORT:-8081}:80"
+      - "6163:80"
+    networks:
+      - pasarguardbot
 
-volumes:
-  redis_data:
-  mariadb_data:
+  bot:
+    build:
+      context: ${PASARGUARDBOT_SOURCE_DIR:-.}
+      dockerfile: Dockerfile
+    image: pasarguardbot:latest
+    container_name: pasarguardbot
+    restart: unless-stopped
+    env_file:
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/.env
+    volumes:
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/.env:/app/.env:ro
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/logs:/app/logs
+      - ${PASARGUARDBOT_CONFIG_DIR:-.}/sessions:/app/sessions
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${FASTAPI_PORT:-6160}:${FASTAPI_PORT:-6160}"
+    networks:
+      - pasarguardbot
+
+networks:
+  pasarguardbot:
+    name: pasarguardbot

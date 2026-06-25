@@ -2,3 +2,9 @@
 /.vscode
 /.venv
 NOTE.txt
+.env
+logs/
+sessions/
+data/
+*.session
+*.session-journal

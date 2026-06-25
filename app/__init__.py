@@ -8,7 +8,7 @@ from telethon.tl.types import (
     MessageEntityTextUrl,
 )
 
-from config import API_HASH, API_ID, BOT_TOKEN
+from config import API_HASH, API_ID, BOT_TOKEN, TELETHON_SESSION_PATH
 
 if not API_ID or not API_HASH or not BOT_TOKEN:
     raise ValueError("API_ID, API_HASH, and BOT_TOKEN are required!")
@@ -46,5 +46,5 @@ class CustomMarkdown:
         return markdown.unparse(text, entities)
 
 
-Kenzo = TelegramClient("KenzoSession", API_ID, API_HASH)
+Kenzo = TelegramClient(TELETHON_SESSION_PATH, API_ID, API_HASH)
 Kenzo.parse_mode = CustomMarkdown()
