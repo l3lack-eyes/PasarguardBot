@@ -47,7 +47,7 @@ DEFAULT_SUBSCRIPTION_SETTINGS: dict[str, Any] = {
     "node_prefixes": [],
     "show_prefixes_in_locations": True,
     "link_mode": "both",
-    "single_config_link_indexes": "all",
+    "single_config_link_indexes": "",
 }
 
 DEFAULT_TEST_SETTINGS: dict[str, Any] = {
@@ -520,7 +520,7 @@ def panel_subscription_link_mode(panel) -> str:
 def panel_single_config_link_indexes(panel) -> str:
     settings = subscription_settings(panel)
     if "single_config_link_indexes" not in settings:
-        return "all"
+        return ""
     value = settings.get("single_config_link_indexes")
     if value in (None, ""):
         return ""

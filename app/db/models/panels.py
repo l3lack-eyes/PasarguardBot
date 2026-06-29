@@ -20,8 +20,9 @@ class Panels(Base):
     tunnel_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     username: Mapped[str] = mapped_column(String(50), nullable=False)
-    password: Mapped[str] = mapped_column(String(128), nullable=False)
+    password: Mapped[str] = mapped_column(String(512), nullable=False)
     cookie: Mapped[str] = mapped_column(String(500), nullable=False)
+    auth_type: Mapped[str] = mapped_column(String(20), nullable=False, default="password", insert_default="password")
 
     button_settings: Mapped[dict[str, Any]] = mapped_column(
         PostgresJSONB,

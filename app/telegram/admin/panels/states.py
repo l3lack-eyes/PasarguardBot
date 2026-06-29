@@ -10,6 +10,9 @@ PANEL_ADMIN_EXACT = frozenset(
 )
 
 PANEL_ADMIN_PREFIXES = (
+    "panel_add_auth:",
+    "panel_auth_type:",
+    "panel_auth_set:",
     "panel_info:",
     "edit_panel_display:",
     "panel_display_",

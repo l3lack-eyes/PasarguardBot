@@ -6,7 +6,6 @@ import contextlib
 import re
 
 from httpx import HTTPStatusError
-from pasarguard import PasarguardAPI
 from telethon import Button, events
 from telethon.tl.custom import Message
 
@@ -15,6 +14,12 @@ from app.db.crud.keyboards import KeyboardButtonCRUD
 from app.db.crud.panels import PanelsManager
 from app.db.crud.user import UserCRUD
 from app.logger import get_logger
+from app.services.panels.auth import (
+    AUTH_API_KEY,
+    PANEL_AUTH_PLACEHOLDER_USERNAME,
+    verify_panel_api_key,
+    verify_panel_password,
+)
 from app.services.panels.config_links import (
     parse_single_config_link_indexes,
     summarize_single_config_link_selection,
@@ -64,6 +69,7 @@ from app.telegram.shared.keyboards.panel_buttons import (
 from app.telegram.state import clear_user, delete_data, get_data, get_step, set_data, set_step
 from app.telegram.state.store import clear_user_conversation, get_user_state, set_user_state
 from app.utils.formatting.conversions import convert_storage
+from app.utils.security.crypto import encrypt_data
 from config import ADMIN_ID
 
 logger = get_logger(__name__)
@@ -158,8 +164,15 @@ async def panel_admin_message_handler(event: Message):
 
     if step == "AddPanel_url" and msg != "🔙 بازگشت به پنل":
         await set_user_state(user_id, "url", msg.strip().rstrip("/"))
-        await Kenzo.send_message(entity=user_id, message="نام کاربری پنل را ارسال کنید")
-        await set_step(user_id, "AddPanel_username")
+        await Kenzo.send_message(
+            entity=user_id,
+            message="🔐 نوع ورود به پنل را انتخاب کنید:",
+            buttons=[
+                [Button.inline("👤 نام کاربری و رمز", data="panel_add_auth:password")],
+                [Button.inline("🔑 API Key", data="panel_add_auth:api_key")],
+            ],
+        )
+        await set_step(user_id, "AddPanel_auth_type")
         return
 
     if step == "AddPanel_username" and msg != "🔙 بازگشت به پنل":
@@ -170,18 +183,18 @@ async def panel_admin_message_handler(event: Message):
 
     if step == "AddPanel_password" and msg != "🔙 بازگشت به پنل":
         await set_user_state(user_id, "password", msg)
+        await set_user_state(user_id, "auth_type", "password")
         panel_url = await get_user_state(user_id, "url")
         panel_username = await get_user_state(user_id, "username")
         panel_password = await get_user_state(user_id, "password")
 
         try:
-            api = PasarguardAPI(base_url=panel_url)
-            token = await api.get_token(username=panel_username, password=panel_password)
-            groups_resp = await api.get_all_groups(token.access_token)
+            authed, _token = await verify_panel_password(panel_url, panel_username, panel_password)
+            groups_resp = await authed.get_all_groups()
             groups_data = [(group.id, group.name) for group in groups_resp.groups]
             cache_panel_groups("add", event.sender_id, groups_data)
             await set_user_state(event.sender_id, "panel_add_groups_list", groups_data)
-            await set_user_state(event.sender_id, "panel_selected_groups", "")
+            await set_user_state(event.sender_id, "panel_selected_groups", [])
 
             message = build_add_panel_group_message(groups_data, [])
             buttons = build_group_selection_buttons(
@@ -207,6 +220,119 @@ async def panel_admin_message_handler(event: Message):
             await clear_user_conversation(user_id)
             await set_step(event.sender_id, "panel")
             logger.info("Add panel error: %s", e)
+        return
+
+    if step == "AddPanel_api_key" and msg != "🔙 بازگشت به پنل":
+        await set_user_state(user_id, "api_key", msg)
+        await set_user_state(user_id, "auth_type", "api_key")
+        panel_url = await get_user_state(user_id, "url")
+        api_key = msg.strip()
+
+        try:
+            authed = await verify_panel_api_key(panel_url, api_key)
+            groups_resp = await authed.get_all_groups()
+            groups_data = [(group.id, group.name) for group in groups_resp.groups]
+            cache_panel_groups("add", event.sender_id, groups_data)
+            await set_user_state(event.sender_id, "panel_add_groups_list", groups_data)
+            await set_user_state(event.sender_id, "panel_selected_groups", [])
+
+            message = build_add_panel_group_message(groups_data, [])
+            buttons = build_group_selection_buttons(
+                groups_data,
+                [],
+                lambda gid: f"panel_add_group_toggle:{gid}",
+                "panel_add_group_confirm",
+                "panel_add_group_cancel",
+                "panel_add_group_select_all",
+            )
+            await Kenzo.send_message(entity=event.sender_id, message=message, buttons=buttons)
+            await set_step(event.sender_id, "AddPanel_select_group")
+        except HTTPStatusError as e:
+            if e.response.status_code == 401:
+                await event.respond("Error: Unauthorized. Please check your API Key.")
+            else:
+                await event.respond(f"HTTP error occurred: {e}")
+            await clear_user_conversation(user_id)
+            await set_step(event.sender_id, "panel")
+            logger.info("Add panel HTTP error: %s", e)
+        except Exception as e:
+            await event.respond(f"An unexpected error occurred: {e}")
+            await clear_user_conversation(user_id)
+            await set_step(event.sender_id, "panel")
+            logger.info("Add panel error: %s", e)
+        return
+
+    if step == "ChangePanelAuth_username" and msg != "🔙 بازگشت به پنل":
+        await set_user_state(user_id, "change_panel_auth_username", msg)
+        panel_code = await get_user_state(user_id, "change_panel_auth_code")
+        await Kenzo.send_message(
+            entity=user_id,
+            message="رمز عبور جدید پنل را ارسال کنید:",
+            buttons=[[Button.inline("❌ انصراف", data=f"panel_auth_type:{panel_code}")]],
+        )
+        await set_step(user_id, "ChangePanelAuth_password")
+        return
+
+    if step == "ChangePanelAuth_password" and msg != "🔙 بازگشت به پنل":
+        panel_code = _parse_stored_id(await get_user_state(user_id, "change_panel_auth_code"))
+        panel_username = (await get_user_state(user_id, "change_panel_auth_username") or "").strip()
+        panel = await PanelsManager().get_panel_by_code(panel_code) if panel_code else None
+        if not panel:
+            await event.respond("❌ پنل یافت نشد.")
+            await clear_user_conversation(user_id)
+            await set_step(user_id, "panel")
+            return
+        try:
+            authed, jwt_token = await verify_panel_password(panel.base_url, panel_username, msg)
+            await authed.get_all_groups()
+            await PanelsManager().update_panel(
+                panel_code,
+                auth_type="password",
+                username=panel_username,
+                password=encrypt_data(msg.strip()),
+                cookie=jwt_token,
+            )
+            await clear_user_conversation(user_id)
+            await set_step(user_id, "panel")
+            await event.respond(
+                "✅ نوع ورود به نام کاربری/رمز تغییر کرد.",
+                buttons=[[Button.inline("بازگشت", data=f"panel_info:{panel_code}")]],
+            )
+        except HTTPStatusError as e:
+            await event.respond(f"خطا در احراز هویت: {e}")
+        except Exception as e:
+            await event.respond(f"خطا: {e}")
+        return
+
+    if step == "ChangePanelAuth_api_key" and msg != "🔙 بازگشت به پنل":
+        panel_code = _parse_stored_id(await get_user_state(user_id, "change_panel_auth_code"))
+        panel = await PanelsManager().get_panel_by_code(panel_code) if panel_code else None
+        if not panel:
+            await event.respond("❌ پنل یافت نشد.")
+            await clear_user_conversation(user_id)
+            await set_step(user_id, "panel")
+            return
+        api_key = msg.strip()
+        try:
+            authed = await verify_panel_api_key(panel.base_url, api_key)
+            await authed.get_all_groups()
+            await PanelsManager().update_panel(
+                panel_code,
+                auth_type=AUTH_API_KEY,
+                username=PANEL_AUTH_PLACEHOLDER_USERNAME,
+                password="",
+                cookie=api_key,
+            )
+            await clear_user_conversation(user_id)
+            await set_step(user_id, "panel")
+            await event.respond(
+                "✅ نوع ورود به API Key تغییر کرد.",
+                buttons=[[Button.inline("بازگشت", data=f"panel_info:{panel_code}")]],
+            )
+        except HTTPStatusError as e:
+            await event.respond(f"خطا در احراز هویت: {e}")
+        except Exception as e:
+            await event.respond(f"خطا: {e}")
         return
 
     if (step or "").startswith("edit_panel_display:") and msg:

@@ -6,15 +6,21 @@ import json
 from collections.abc import Callable
 from random import randint
 
-from httpx import HTTPStatusError
-from pasarguard import GroupsResponse, PasarguardAPI
+from pasarguard import GroupsResponse
 from telethon import Button
 
 from app.db.crud.panels import PanelsManager
+from app.services.panels.auth import (
+    AUTH_API_KEY,
+    PANEL_AUTH_PLACEHOLDER_USERNAME,
+    fetch_panel_groups_with_auth,
+    verify_panel_api_key,
+    verify_panel_password,
+)
 from app.services.panels.settings import panel_default_group_ids
 from app.telegram.state import set_step
 from app.telegram.state.store import clear_user_conversation, get_user_state
-from app.utils.security.crypto import decrypt_data, encrypt_data
+from app.utils.security.crypto import encrypt_data
 
 panel_group_cache: dict[tuple[str, int, int | None], list[tuple[int, str]]] = {}
 
@@ -51,6 +57,8 @@ def step_data_to_group_ids(data: str | int | list | None) -> list[int]:
     raw = str(data).strip()
     if not raw:
         return []
+    if raw.isdigit():
+        return [int(raw)]
     if raw.startswith("["):
         return deserialize_group_ids(raw)
     return [int(x) for x in raw.split(",") if x.strip().isdigit()]
@@ -86,33 +94,36 @@ def get_panel_default_group_name(panel, groups_resp: GroupsResponse) -> str:
 
 
 async def fetch_panel_groups(panel) -> GroupsResponse:
-    api = PasarguardAPI(base_url=panel.base_url)
-    try:
-        return await api.get_all_groups(panel.cookie)
-    except HTTPStatusError as exc:
-        if exc.response.status_code == 401:
-            new_token = await api.get_token(username=panel.username, password=decrypt_data(panel.password))
-            panel.cookie = new_token.access_token
-            await PanelsManager().update_panel(code=panel.code, cookie=new_token.access_token)
-            return await api.get_all_groups(new_token.access_token)
-        raise
+    return await fetch_panel_groups_with_auth(panel)
 
 
 async def create_panel_with_group(user_id: int, default_group_ids: list[int] | None):
     panel_name = await get_user_state(user_id, "name")
     panel_url = await get_user_state(user_id, "url")
-    panel_username = await get_user_state(user_id, "username")
-    panel_password = await get_user_state(user_id, "password")
+    auth_type = await get_user_state(user_id, "auth_type") or "password"
 
-    if not all([panel_name, panel_url, panel_username, panel_password]):
-        raise ValueError("اطلاعات پنل کامل نیست.")
-
-    panel_url = panel_url.strip()
-    panel_username = panel_username.strip()
-    panel_password = panel_password.strip()
-
-    token = await PasarguardAPI(base_url=panel_url).get_token(username=panel_username, password=panel_password)
-    groups_resp = await PasarguardAPI(base_url=panel_url).get_all_groups(token.access_token)
+    if auth_type == AUTH_API_KEY:
+        api_key = (await get_user_state(user_id, "api_key") or "").strip()
+        if not all([panel_name, panel_url, api_key]):
+            raise ValueError("اطلاعات پنل کامل نیست.")
+        panel_url = panel_url.strip()
+        authed = await verify_panel_api_key(panel_url, api_key)
+        groups_resp = await authed.get_all_groups()
+        stored_password = ""
+        cookie = api_key
+        panel_username = PANEL_AUTH_PLACEHOLDER_USERNAME
+    else:
+        panel_username = await get_user_state(user_id, "username")
+        panel_password = await get_user_state(user_id, "password")
+        if not all([panel_name, panel_url, panel_username, panel_password]):
+            raise ValueError("اطلاعات پنل کامل نیست.")
+        panel_url = panel_url.strip()
+        panel_username = panel_username.strip()
+        panel_password = panel_password.strip()
+        authed, jwt_token = await verify_panel_password(panel_url, panel_username, panel_password)
+        groups_resp = await authed.get_all_groups()
+        stored_password = encrypt_data(panel_password)
+        cookie = jwt_token
 
     if default_group_ids:
         group_ids_set = {g.id for g in groups_resp.groups}
@@ -137,9 +148,10 @@ async def create_panel_with_group(user_id: int, default_group_ids: list[int] | N
         enable=1,
         base_url=panel_url,
         username=panel_username,
-        password=encrypt_data(panel_password),
-        cookie=token.access_token,
+        password=stored_password,
+        cookie=cookie,
         default_group_ids=storage_value,
+        auth_type=auth_type,
     )
 
     await clear_user_conversation(user_id)

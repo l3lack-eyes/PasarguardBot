@@ -5,6 +5,7 @@ from typing import Any
 from telethon import Button
 
 from app.db.crud.keyboards import KeyboardButtonCRUD
+from app.services.panels.auth import panel_auth_type_label
 from app.services.panels.settings import (
     panel_button_enabled,
     panel_display_mode,
@@ -150,6 +151,7 @@ def build_panel_admin_settings_buttons(panel: Any) -> list:
         [Button.inline("🎨 استایل دکمه (خرید / لیست)", data=f"edit_panel_display:{code}")],
         [Button.inline(f"⚡ فعال‌سازی پنل ({on})", data=f"panel_toggle_status:{code}")],
         [Button.inline("✏️ نام", data=f"change_panel_name:{code}")],
+        [Button.inline(f"🔑 ورود ({panel_auth_type_label(panel, short=True)})", data=f"panel_auth_type:{code}")],
         [Button.inline("📦 گروه پیش‌فرض", data=f"change_panel_group:{code}")],
         [Button.inline("👥 محدودیت کاربر", data=f"panel_user_limit:{code}")],
         [glass_inline_button("📱 دکمه‌های سرویس من", data=f"panel_ms_buttons:{code}")],

@@ -8,9 +8,14 @@ ADD_PANEL_STEPS = frozenset(
     {
         "addPanel_name",
         "AddPanel_url",
+        "AddPanel_auth_type",
         "AddPanel_username",
         "AddPanel_password",
+        "AddPanel_api_key",
         "AddPanel_select_group",
+        "ChangePanelAuth_username",
+        "ChangePanelAuth_password",
+        "ChangePanelAuth_api_key",
     }
 )
 

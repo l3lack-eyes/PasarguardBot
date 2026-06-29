@@ -1,13 +1,15 @@
 import html
 import time
 
-from pasarguard import PasarguardAPI
-
 from app.db.crud.panels import PanelsManager
 from app.logger import LogTag, LogType, get_logger
-from app.services.panels.cookies import format_panel_cookie_validity, panel_cookie_needs_refresh
+from app.services.panels.auth import (
+    format_panel_refresh_status,
+    panel_needs_cookie_refresh,
+    refresh_panel_cookie,
+)
+from app.services.panels.cookies import format_panel_cookie_validity
 from app.telegram.shared.utils.logging import send_log_message
-from app.utils.security.crypto import decrypt_data
 
 logger = get_logger(__name__)
 
@@ -51,9 +53,8 @@ def _build_cookie_update_log(
         if successful_panels or failed_panels:
             parts.append("\n")
         parts.append("⏭ <b>بدون نیاز به به‌روزرسانی:</b>\n")
-        for name, cookie in skipped_panels:
-            validity = format_panel_cookie_validity(cookie, locale="fa")
-            parts.append(f"  • {html.escape(name)} — <i>{html.escape(validity)}</i>\n")
+        for name, status in skipped_panels:
+            parts.append(f"  • {html.escape(name)} — <i>{html.escape(status)}</i>\n")
 
     parts.append(f"\n⏱ زمان: {elapsed:.1f}s")
     return "".join(parts)
@@ -76,28 +77,21 @@ async def get_cookies():
     panels_log_summary: list[tuple[int, str]] = []
 
     for panel in panels:
-        if not panel_cookie_needs_refresh(panel.cookie):
-            skipped_panels.append((panel.name, panel.cookie))
-            panels_log_summary.append((panel.code, panel.cookie))
-            logger.debug(
-                "%s get_cookies: skipped %s — %s",
-                LogTag.JOB,
-                panel.code,
-                format_panel_cookie_validity(panel.cookie, locale="en"),
-            )
+        if not panel_needs_cookie_refresh(panel):
+            status = format_panel_refresh_status(panel, locale="en")
+            skipped_panels.append((panel.name, format_panel_refresh_status(panel, locale="fa")))
+            panels_log_summary.append((panel.code, status))
+            logger.debug("%s get_cookies: skipped %s — %s", LogTag.JOB, panel.code, status)
             continue
         try:
-            token = await PasarguardAPI(base_url=panel.base_url).get_token(
-                username=panel.username, password=decrypt_data(panel.password)
-            )
-            await PanelsManager().update_panel(code=panel.code, cookie=token.access_token)
-            successful_panels.append((panel.name, token.access_token))
-            panels_log_summary.append((panel.code, token.access_token))
+            token = await refresh_panel_cookie(panel)
+            successful_panels.append((panel.name, token))
+            panels_log_summary.append((panel.code, format_panel_cookie_validity(token, locale="en")))
             logger.debug(
                 "%s get_cookies: refreshed %s — %s",
                 LogTag.JOB,
                 panel.code,
-                format_panel_cookie_validity(token.access_token, locale="en"),
+                format_panel_cookie_validity(token, locale="en"),
             )
         except Exception as e:
             failed_panels.append((panel.name, panel.base_url, str(e)))
@@ -116,10 +110,7 @@ async def get_cookies():
             parse_mode="html",
         )
 
-    panels_summary = ", ".join(
-        f"{panel_code}: {format_panel_cookie_validity(cookie, locale='en')}"
-        for panel_code, cookie in panels_log_summary
-    )
+    panels_summary = ", ".join(f"{panel_code}: {status}" for panel_code, status in panels_log_summary)
     logger.info(
         f"{LogTag.JOB} get_cookies | duration={elapsed:.2f}s, "
         f"ok={len(successful_panels)}, fail={len(failed_panels)}, skip={len(skipped_panels)}"

@@ -32,6 +32,7 @@ class PanelsManager:
         tunnel_url=None,
         default_group_ids=None,
         user_limit=None,
+        auth_type="password",
     ):
         group_ids = parse_group_ids_value(default_group_ids)
         json_settings = default_panel_json_settings(
@@ -48,6 +49,7 @@ class PanelsManager:
                 password=password,
                 cookie=cookie,
                 tunnel_url=tunnel_url,
+                auth_type=auth_type,
                 **json_settings,
             )
             session.add(new_panel)
