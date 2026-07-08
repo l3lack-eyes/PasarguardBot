@@ -33,8 +33,6 @@ def wallet_type_buttons(existing_types: set[str]):
         buttons.append([Button.inline("🟢 TRX (Tron)", data="select_wallet_type:TRX")])
     if "USDT" not in existing_types:
         buttons.append([Button.inline("💵 USDT (Tether)", data="select_wallet_type:USDT")])
-    if "BTC" not in existing_types:
-        buttons.append([Button.inline("🟠 BTC (Bitcoin)", data="select_wallet_type:BTC")])
     if "TON" not in existing_types:
         buttons.append([Button.inline("🔵 TON (Toncoin)", data="select_wallet_type:TON")])
     return buttons
@@ -49,8 +47,6 @@ def edit_wallet_type_buttons(wallet_id: int, existing_types: set[str], current_t
         buttons.append([Button.inline("🟢 TRX (Tron)", data=f"edit_select_wallet_type:{wallet_id}:TRX")])
     if "USDT" not in existing_types and current_type != "USDT":
         buttons.append([Button.inline("💵 USDT (Tether)", data=f"edit_select_wallet_type:{wallet_id}:USDT")])
-    if "BTC" not in existing_types and current_type != "BTC":
-        buttons.append([Button.inline("🟠 BTC (Bitcoin)", data=f"edit_select_wallet_type:{wallet_id}:BTC")])
     if "TON" not in existing_types and current_type != "TON":
         buttons.append([Button.inline("🔵 TON (Toncoin)", data=f"edit_select_wallet_type:{wallet_id}:TON")])
     buttons.append([Button.inline("🔙 بازگشت", data=states.WALLET_MANAGEMENT_CALLBACK)])

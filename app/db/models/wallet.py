@@ -9,5 +9,5 @@ class Wallet(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     address: Mapped[str] = mapped_column(Text, nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)  # e.g., "TRX", "BTC", "ETH"
+    type: Mapped[str] = mapped_column(Text, nullable=False)  # e.g., "TRX", "USDT", "TON"
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)  # API key for services like TRON-PRO-API-KEY
