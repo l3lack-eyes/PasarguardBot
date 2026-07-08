@@ -20,6 +20,7 @@ from app.services.billing.reseller_pricing import resolve_live_unit_price
 from app.services.panels.admins import (
     activate_reseller_admin,
     get_reseller_admin,
+    get_reseller_admins_by_username,
     modify_reseller_admin,
     purge_reseller_admin,
     suspend_reseller_admin,
@@ -32,6 +33,7 @@ log = get_logger(__name__)
 
 GRACE_DELETE_SECONDS = 7 * 86400
 BILLING_SNAPSHOT_RETENTION_DAYS = 90
+_ADMIN_NOT_PROVIDED = object()
 _last_snapshot_cleanup_at = 0
 
 
@@ -172,13 +174,22 @@ async def _process_hourly_account(account, settings, now: int, *, stats: _Billin
         stats.hourly_charged += 1
 
 
-async def _process_usage_account(account, settings, now: int, *, stats: _BillingRunStats | None = None) -> None:
-    panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
-    if not panel:
-        return
-
+async def _process_usage_account(
+    account,
+    settings,
+    now: int,
+    *,
+    stats: _BillingRunStats | None = None,
+    panel=None,
+    admin=_ADMIN_NOT_PROVIDED,
+) -> None:
+    if panel is None:
+        panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
+        if not panel:
+            return
     plan = await _resolve_plan(account)
-    admin = await get_reseller_admin(panel, account.username)
+    if admin is _ADMIN_NOT_PROVIDED:
+        admin = await get_reseller_admin(panel, account.username)
     if not admin:
         return
 
@@ -235,6 +246,13 @@ async def _process_usage_account(account, settings, now: int, *, stats: _Billing
     )
     if stats:
         stats.usage_charged += 1
+
+
+def _group_accounts_by_panel(accounts) -> dict[int, list]:
+    grouped: dict[int, list] = {}
+    for account in accounts:
+        grouped.setdefault(account.panel_code, []).append(account)
+    return grouped
 
 
 async def _try_reactivate_suspended(settings, *, stats: _BillingRunStats | None = None) -> None:
@@ -348,12 +366,32 @@ async def run_reseller_billing() -> None:
 
     usage_accounts = await ResellerAccountCRUD().get_billable_accounts(("usage",))
     stats.usage_accounts = len(usage_accounts)
-    for account in usage_accounts:
+    for panel_code, panel_accounts in _group_accounts_by_panel(usage_accounts).items():
+        panel = await PanelsManager().get_panel_by_code(code=panel_code)
+        if not panel:
+            continue
+
+        usernames = {account.username for account in panel_accounts if account.username}
         try:
-            await _process_usage_account(account, settings, now, stats=stats)
+            admins_by_username = await get_reseller_admins_by_username(panel, usernames)
         except Exception as exc:
-            stats.errors += 1
-            log.error("usage billing error code=%s: %s", account.code, exc)
+            stats.errors += len(panel_accounts)
+            log.error("usage billing admins fetch error panel=%s: %s", panel_code, exc)
+            continue
+
+        for account in panel_accounts:
+            try:
+                await _process_usage_account(
+                    account,
+                    settings,
+                    now,
+                    stats=stats,
+                    panel=panel,
+                    admin=admins_by_username.get(account.username),
+                )
+            except Exception as exc:
+                stats.errors += 1
+                log.error("usage billing error code=%s: %s", account.code, exc)
 
     elapsed = time.time() - start_time
     log.info(

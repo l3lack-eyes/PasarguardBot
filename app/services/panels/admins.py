@@ -18,6 +18,7 @@ from app.utils.formatting.conversions import day_to_timestamp, gigabytes_to_byte
 
 log = get_logger(__name__)
 
+_ADMIN_PAGE_SIZE = 300
 _SPECIAL_CHARS = "!@#$%^&*()-_=+"
 _UPPER = string.ascii_uppercase
 _LOWER = string.ascii_lowercase
@@ -107,6 +108,52 @@ async def get_reseller_admin(panel, username: str):
         return resp.admins[0] if resp.admins else None
 
     return await _with_auth_retry(panel, _get)
+
+
+async def list_panel_admins(
+    panel,
+    *,
+    usernames: set[str] | None = None,
+    page_size: int = _ADMIN_PAGE_SIZE,
+) -> list[Any]:
+    wanted_usernames = {username.strip() for username in usernames or set() if username and username.strip()}
+
+    async def _list(api: PasarguardAPI, token: str):
+        admins = []
+        matched_usernames: set[str] = set()
+        offset = 0
+        limit = max(1, page_size)
+        while True:
+            resp = await api.get_admins(token=token, offset=offset, limit=limit)
+            page = getattr(resp, "admins", None) or []
+            if not page:
+                break
+
+            for admin in page:
+                admin_username = str(getattr(admin, "username", "") or "").strip()
+                if wanted_usernames and admin_username not in wanted_usernames:
+                    continue
+                admins.append(admin)
+                if admin_username:
+                    matched_usernames.add(admin_username)
+
+            if wanted_usernames and matched_usernames >= wanted_usernames:
+                break
+
+            total = int(getattr(resp, "total", 0) or 0)
+            offset += limit
+            if (total > 0 and offset >= total) or len(page) < limit:
+                break
+        return admins
+
+    return await _with_auth_retry(panel, _list)
+
+
+async def get_reseller_admins_by_username(panel, usernames: set[str]) -> dict[str, Any]:
+    if not any(username and username.strip() for username in usernames):
+        return {}
+    admins = await list_panel_admins(panel, usernames=usernames)
+    return {username: admin for admin in admins if (username := str(getattr(admin, "username", "") or "").strip())}
 
 
 def _build_role_limits(plan: ResellerPlan, max_users: int | None = None) -> RoleLimits | None:
