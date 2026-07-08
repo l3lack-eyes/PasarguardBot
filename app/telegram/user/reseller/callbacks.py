@@ -27,6 +27,7 @@ from app.services.panels.admins import (
     list_reseller_admin_users,
     reset_reseller_admin_password,
 )
+from app.services.panels.settings import panel_reseller_sale_enabled
 from app.services.reseller.logging import send_reseller_log
 from app.telegram.keyboards import reseller as rs_buttons
 from app.telegram.keyboards.home import bhome_buttons
@@ -178,13 +179,16 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
 
     if data.startswith("ResellerPanel_"):
         panel_code = int(data.split("_")[1])
+        panel = await PanelsManager().get_panel_by_code(code=panel_code)
+        if not panel or not panel_reseller_sale_enabled(panel):
+            await event.answer("این پنل برای فروش نمایندگی فعال نیست.", alert=True)
+            return
         plans = await ResellerPlanManager().get_all_plans(panel_code=panel_code, enabled_only=True)
         if not plans:
             await event.answer("پلنی برای این پنل نیست.", alert=True)
             return
         await set_data(user_id, "reseller_panel_code", str(panel_code))
-        panel = await PanelsManager().get_panel_by_code(code=panel_code)
-        panel_name = panel.name if panel else str(panel_code)
+        panel_name = panel.name
         await reseller_flow_edit(
             event,
             await get_reseller_text(

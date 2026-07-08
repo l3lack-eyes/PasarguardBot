@@ -7,6 +7,7 @@ from app.db.models.services import Service
 from app.logger import get_logger
 from app.services.panels.settings import (
     default_panel_json_settings,
+    panel_shop_sale_enabled,
     panel_user_limit,
     parse_group_ids_value,
     resolve_panel_update_kwargs,
@@ -141,7 +142,7 @@ class PanelsManager:
         available_panels = []
 
         for panel in all_panels:
-            if not panel.enable:
+            if not panel_shop_sale_enabled(panel):
                 continue
 
             limit = panel_user_limit(panel)

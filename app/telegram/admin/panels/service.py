@@ -12,7 +12,12 @@ from app.db.crud.panels import PanelsManager
 from app.db.crud.settings import SettingsManager
 from app.logger import get_logger
 from app.services.panels.auth import panel_auth_type_label
-from app.services.panels.settings import panel_test_duration_days, panel_test_volume_gb
+from app.services.panels.settings import (
+    panel_reseller_sale_flag,
+    panel_shop_sale_flag,
+    panel_test_duration_days,
+    panel_test_volume_gb,
+)
 from app.telegram.shared.keyboards.panel_buttons import (
     build_panel_admin_settings_buttons,
     build_panel_list_rows,
@@ -30,6 +35,8 @@ def build_panel_summary_block(panel) -> str:
         f"🏷️ <b>اسم پنل:</b> {panel.name}\n"
         f"🧷 <b>کدپنل:</b> {panel.code}\n"
         f"📶 <b>وضعیت:</b> {'فعال ✅' if panel.enable else 'غیرفعال ❌'}\n"
+        f"🛒 <b>فروش سرویس:</b> {'فعال ✅' if panel_shop_sale_flag(panel) else 'غیرفعال ❌'}\n"
+        f"🏢 <b>فروش نمایندگی:</b> {'فعال ✅' if panel_reseller_sale_flag(panel) else 'غیرفعال ❌'}\n"
         f"🌐 <b>آدرس پنل:</b> {panel.base_url}\n"
         f"🔄 <b>لینک تانل:</b> {panel.tunnel_url or 'تنظیم نشده'}\n"
         f"🔐 <b>نوع ورود:</b> {panel_auth_type_label(panel)}"

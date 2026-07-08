@@ -20,6 +20,8 @@ PANEL_ADMIN_PREFIXES = (
     "change_panel_group:",
     "panel_update_group_",
     "panel_toggle_status:",
+    "panel_toggle_shop_sale:",
+    "panel_toggle_reseller_sale:",
     "panel_user_limit:",
     "set_user_limit:",
     "unlimited_users:",

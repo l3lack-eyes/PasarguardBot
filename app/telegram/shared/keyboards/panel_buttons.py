@@ -10,6 +10,8 @@ from app.services.panels.settings import (
     panel_button_enabled,
     panel_display_mode,
     panel_renew_volume_remaining_mode,
+    panel_reseller_sale_flag,
+    panel_shop_sale_flag,
     panel_time_plans,
     panel_volume_plans,
     panel_webhook_notifications_enabled,
@@ -141,6 +143,8 @@ def build_panel_admin_settings_buttons(panel: Any) -> list:
     """English docstring for build_panel_admin_settings_buttons."""
     code = panel.code
     on = "✅" if panel.enable else "❌"
+    shop_on = "✅" if panel_shop_sale_flag(panel) else "❌"
+    reseller_on = "✅" if panel_reseller_sale_flag(panel) else "❌"
     webhook = "🔔" if panel_webhook_notifications_enabled(panel) else "🤖"
     renew_vol = panel_renew_volume_remaining_mode(panel)
     renew_vol_short = "باقی+ریست" if renew_vol else "جمعی"
@@ -150,6 +154,10 @@ def build_panel_admin_settings_buttons(panel: Any) -> list:
     rows = [
         [Button.inline("🎨 استایل دکمه (خرید / لیست)", data=f"edit_panel_display:{code}")],
         [Button.inline(f"⚡ فعال‌سازی پنل ({on})", data=f"panel_toggle_status:{code}")],
+        [
+            Button.inline(f"🛒 خرید سرویس ({shop_on})", data=f"panel_toggle_shop_sale:{code}"),
+            Button.inline(f"🏢 نمایندگی ({reseller_on})", data=f"panel_toggle_reseller_sale:{code}"),
+        ],
         [Button.inline("✏️ نام", data=f"change_panel_name:{code}")],
         [Button.inline(f"🔑 ورود ({panel_auth_type_label(panel, short=True)})", data=f"panel_auth_type:{code}")],
         [Button.inline("📦 گروه پیش‌فرض", data=f"change_panel_group:{code}")],

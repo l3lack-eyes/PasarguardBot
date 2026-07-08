@@ -30,7 +30,7 @@ from app.services.billing.sticky_discount import discounted_price, get_sticky_di
 from app.services.panels.config_links import get_selected_single_config_links_text
 from app.services.panels.groups import resolve_panel_group_ids
 from app.services.panels.nodes import filter_nodes_by_plan_type, format_node_name_for_display
-from app.services.panels.settings import panel_display_mode, panel_user_limit
+from app.services.panels.settings import panel_display_mode, panel_shop_sale_enabled, panel_user_limit
 from app.services.subscriptions.links import format_subscription_links_for_message
 from app.telegram.keyboards.buy import (
     build_buy_confirm_button_rows,
@@ -152,7 +152,7 @@ async def show_buy_service_selection(event, *, lang: str, use_panel_rows: bool =
             return
         rows = await build_buy_panel_rows(panels)
     else:
-        all_panels = [panel for panel in await PanelsManager().get_all_panels() if panel.enable == 1]
+        all_panels = [panel for panel in await PanelsManager().get_all_panels() if panel_shop_sale_enabled(panel)]
         available_panels = await PanelsManager().get_available_panels()
         if settings and settings.single_panel_buy_mode and len(available_panels) == 1:
             await show_buy_vpn_plans(event, available_panels[0], lang=lang, back_data="DataCancel")
@@ -170,8 +170,8 @@ async def show_buy_vpn_plans(event, panel, *, lang: str = "fa", back_data: str =
     user_id = event.sender_id
     is_callback = hasattr(event, "answer")
 
-    if not panel.enable:
-        msg = "⛔️ این پنل در حال حاضر غیرفعال است!"
+    if not panel_shop_sale_enabled(panel):
+        msg = "⛔️ این پنل در فروش سرویس فعال نیست!"
         if is_callback:
             await event.answer(msg, alert=True)
         else:

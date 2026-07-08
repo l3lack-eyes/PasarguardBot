@@ -43,10 +43,11 @@ from app.services.panels.admins import (
     purge_reseller_admin,
     suspend_reseller_admin,
 )
-from app.services.panels.settings import get_panel_login_url
+from app.services.panels.settings import get_panel_login_url, panel_reseller_sale_enabled
 from app.services.reseller.logging import send_reseller_log
 from app.services.telegram.rich_message import USAGE_HISTORY_PER_PAGE, prepare_rich_markdown
 from app.telegram.keyboards.home import bhome_buttons
+from app.telegram.shared.keyboards.panel_buttons import build_panel_display_button
 from app.telegram.state import clear_user, get_data, set_data, set_step
 from app.telegram.user.reseller.states import RESELLER_FLOW_MSG_KEY
 from app.utils.formatting.dates import Time_Date, timestamp_to_persian_expiry
@@ -135,8 +136,8 @@ async def build_reseller_panel_list_buttons(panel_codes: list) -> list:
     buttons = []
     for code in panel_codes:
         panel = await PanelsManager().get_panel_by_code(code=code)
-        if panel and panel.enable:
-            buttons.append([Button.inline(panel.name, data=f"ResellerPanel_{code}")])
+        if panel and panel_reseller_sale_enabled(panel):
+            buttons.append([await build_panel_display_button(panel, f"ResellerPanel_{code}")])
     buttons.append([await rs_buttons.rs_buy_cancel_button()])
     return buttons
 

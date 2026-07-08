@@ -50,11 +50,14 @@ from app.services.panels.settings import (
     panel_display_mode,
     panel_node_prefixes,
     panel_renew_volume_remaining_mode,
+    panel_reseller_sale_flag,
+    panel_shop_sale_flag,
     panel_show_prefixes_in_locations,
     panel_single_config_link_indexes,
     panel_user_limit,
     panel_webhook_notifications_enabled,
     subscription_settings,
+    toggle_panel_sales_setting,
     update_time_plan_in_feature_settings,
     update_volume_plan_in_feature_settings,
 )
@@ -632,6 +635,46 @@ async def panel_admin_callback_handler(event: events.CallbackQuery.Event):
         await panel_manager.update_panel(panel_code, enable=panel.enable)
 
         await update_panel_buttons(event, panel, info_string, server_status)
+
+    elif data.startswith("panel_toggle_shop_sale:"):
+        panel_code = int(data.split(":")[1])
+        panel_manager = PanelsManager()
+
+        def _toggle_shop(settings):
+            toggle_panel_sales_setting(settings, "shop_enabled")
+
+        if not await mutate_panel_feature_settings(panel_code, _toggle_shop):
+            await event.answer("❌ خطا در ذخیره تنظیمات.", alert=True)
+            return
+        panel = await panel_manager.get_panel_by_code(panel_code)
+        status_text = "فعال ✅" if panel_shop_sale_flag(panel) else "غیرفعال ❌"
+        await event.answer(f"🛒 خرید سرویس: {status_text}", alert=False)
+        await update_panel_buttons(
+            event,
+            panel,
+            build_panel_summary_block(panel),
+            "وضعیت سرور در حال بررسی است...",
+        )
+
+    elif data.startswith("panel_toggle_reseller_sale:"):
+        panel_code = int(data.split(":")[1])
+        panel_manager = PanelsManager()
+
+        def _toggle_reseller(settings):
+            toggle_panel_sales_setting(settings, "reseller_enabled")
+
+        if not await mutate_panel_feature_settings(panel_code, _toggle_reseller):
+            await event.answer("❌ خطا در ذخیره تنظیمات.", alert=True)
+            return
+        panel = await panel_manager.get_panel_by_code(panel_code)
+        status_text = "فعال ✅" if panel_reseller_sale_flag(panel) else "غیرفعال ❌"
+        await event.answer(f"🏢 نمایندگی: {status_text}", alert=False)
+        await update_panel_buttons(
+            event,
+            panel,
+            build_panel_summary_block(panel),
+            "وضعیت سرور در حال بررسی است...",
+        )
 
     elif data.startswith("panel_user_limit:"):
         panel_code = int(data.split(":")[1])

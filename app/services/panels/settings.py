@@ -63,6 +63,12 @@ DEFAULT_RENEWAL_SETTINGS: dict[str, bool] = {
 
 
 FEATURE_SERVICE_UPGRADE = "service_upgrade"
+FEATURE_SALES = "sales"
+
+DEFAULT_FEATURE_SALES: dict[str, bool] = {
+    "shop_enabled": True,
+    "reseller_enabled": True,
+}
 
 JSON_SETTING_COLUMNS = (
     "button_settings",
@@ -123,6 +129,46 @@ def feature_settings(panel) -> dict[str, Any]:
 def panel_service_upgrade(panel) -> dict[str, Any]:
     namespace = feature_settings(panel).get(FEATURE_SERVICE_UPGRADE)
     return namespace if isinstance(namespace, dict) else {}
+
+
+def panel_sales_settings(panel) -> dict[str, bool]:
+    raw = feature_settings(panel).get(FEATURE_SALES)
+    if not isinstance(raw, dict):
+        return copy.deepcopy(DEFAULT_FEATURE_SALES)
+    merged = copy.deepcopy(DEFAULT_FEATURE_SALES)
+    merged.update({key: bool(value) for key, value in raw.items() if key in DEFAULT_FEATURE_SALES})
+    return merged
+
+
+def panel_shop_sale_flag(panel) -> bool:
+    return panel_sales_settings(panel)["shop_enabled"]
+
+
+def panel_reseller_sale_flag(panel) -> bool:
+    return panel_sales_settings(panel)["reseller_enabled"]
+
+
+def panel_shop_sale_enabled(panel) -> bool:
+    return bool(panel and panel.enable and panel_shop_sale_flag(panel))
+
+
+def panel_reseller_sale_enabled(panel) -> bool:
+    return bool(panel and panel.enable and panel_reseller_sale_flag(panel))
+
+
+def toggle_panel_sales_setting(settings: dict[str, Any], key: str) -> None:
+    sales = panel_sales_settings_from_feature(settings)
+    sales[key] = not sales[key]
+    settings[FEATURE_SALES] = sales
+
+
+def panel_sales_settings_from_feature(settings: dict[str, Any]) -> dict[str, bool]:
+    raw = settings.get(FEATURE_SALES)
+    if not isinstance(raw, dict):
+        return copy.deepcopy(DEFAULT_FEATURE_SALES)
+    merged = copy.deepcopy(DEFAULT_FEATURE_SALES)
+    merged.update({flag: bool(raw.get(flag, default)) for flag, default in DEFAULT_FEATURE_SALES.items()})
+    return merged
 
 
 def _compact_volume_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +233,10 @@ def compact_feature_settings(settings: dict[str, Any]) -> dict[str, Any]:
             service_upgrade = _compact_service_upgrade_namespace(value)
             if service_upgrade:
                 compact[key] = service_upgrade
+        elif key == FEATURE_SALES and isinstance(value, dict):
+            sales = {flag: bool(value[flag]) for flag in DEFAULT_FEATURE_SALES if flag in value}
+            if sales != DEFAULT_FEATURE_SALES:
+                compact[key] = sales
         elif value not in (None, {}, []):
             compact[key] = value
     return compact

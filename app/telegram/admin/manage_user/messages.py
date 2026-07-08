@@ -350,8 +350,7 @@ async def msg_manage_user_admin(event: Message):
             founded = await UserCRUD().read_user(user_id)
             if founded:
                 await event.respond(
-                    f"▪️ لطفا از دکمه های زیر انتخاب کنید:\n"
-                    f"وضعیت کاربر: {await get_step(user_id)}",
+                    f"▪️ لطفا از دکمه های زیر انتخاب کنید:\nوضعیت کاربر: {await get_step(user_id)}",
                     buttons=await create_inline_manageuser(user_id),
                 )
 
