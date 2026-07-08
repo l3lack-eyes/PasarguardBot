@@ -77,6 +77,16 @@ SETTINGS_MENU_SECTIONS = (
         ),
     ),
     SettingsMenuSection(
+        "reseller_sales",
+        "🏢 فروش نمایندگی پنل",
+        "فعال‌سازی فروش نمایندگی، billing مصرفی و حداقل موجودی کیف پول برای نمایندگان.",
+        (
+            SettingsMenuItem("فروش نمایندگی", "reseller_sale_mode"),
+            SettingsMenuItem("billing مصرفی", "reseller_usage_billing_enabled"),
+        ),
+        columns=2,
+    ),
+    SettingsMenuSection(
         "service_tools",
         "🔗 دکمه‌ها و ابزارهای صفحه سرویس",
         "این بخش تعیین می‌کند کاربر داخل صفحه سرویس چه ابزارهایی مثل QR، لینک‌ها، کلاینت‌ها و انتقال کانفیگ ببیند.",

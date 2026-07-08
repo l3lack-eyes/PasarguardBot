@@ -24,6 +24,7 @@ Lock_Channels_Inline_Menu = [
 async def create_inline_manageuser(UserID):
     buttons = [
         [Button.inline("📂 لیست سرویس‌ها", f"MToUser_listSv:{UserID}")],
+        [Button.inline("🏢 نمایندگی‌های کاربر", f"MToUser_resellers:{UserID}")],
         [
             Button.inline("🔍 جستجوی کانفیگ", f"AdminSearchConfig:{UserID}"),
             Button.inline("🗑 حذف گروهی کانفیگ", f"BulkDeleteConfigs:{UserID}"),
@@ -37,6 +38,46 @@ async def create_inline_manageuser(UserID):
 
     buttons.append([Button.inline("ساخت کانفیگ برای کاربر", f"CreateConfigFor:{UserID}")])
     return buttons
+
+
+def build_admin_reseller_list_buttons(user_id: int, accounts) -> list:
+    rows = [
+        [Button.inline(f"🏢 {acc.username} · #{acc.code}", data=f"AdminReseller_view:{user_id}:{acc.code}")]
+        for acc in accounts
+    ]
+    rows.append([Button.inline("🔙 بازگشت", data=f"BackToUserManagement:{user_id}")])
+    return rows
+
+
+def build_admin_reseller_account_buttons(user_id: int, account) -> list:
+    code = account.code
+    rows = [
+        [Button.inline("🔑 نمایش رمز ورود", data=f"AdminReseller_creds:{user_id}:{code}")],
+        [Button.inline("🔄 تغییر رمز عبور", data=f"AdminReseller_chpwd:{user_id}:{code}")],
+    ]
+    if account.status in ("paused", "admin_paused"):
+        rows.append([Button.inline("▶️ فعال‌سازی پنل", data=f"AdminReseller_resume:{user_id}:{code}")])
+    elif account.status in ("active", "suspended"):
+        rows.append([Button.inline("⏸ غیرفعال‌سازی پنل", data=f"AdminReseller_pause:{user_id}:{code}")])
+    if account.pricing_mode == "fixed":
+        rows.append([Button.inline("💎 تمدید", data=f"AdminReseller_renew:{user_id}:{code}")])
+    rows.append([Button.inline("🗑 حذف نمایندگی", data=f"AdminReseller_delete:{user_id}:{code}")])
+    rows.append([Button.inline("🔙 بازگشت به لیست", data=f"MToUser_resellers:{user_id}")])
+    return rows
+
+
+def build_admin_reseller_delete_confirm_buttons(user_id: int, account_code: int) -> list:
+    return [
+        [Button.inline("✅ بله، کامل حذف شود", data=f"AdminReseller_delete_confirm:{user_id}:{account_code}")],
+        [Button.inline("❌ انصراف", data=f"AdminReseller_view:{user_id}:{account_code}")],
+    ]
+
+
+def build_admin_reseller_chpwd_confirm_buttons(user_id: int, account_code: int) -> list:
+    return [
+        [Button.inline("✅ بله، رمز عوض شود", data=f"AdminReseller_chpwd_confirm:{user_id}:{account_code}")],
+        [Button.inline("❌ انصراف", data=f"AdminReseller_view:{user_id}:{account_code}")],
+    ]
 
 
 def btn_cardtocard_settings(settings=None):
@@ -66,6 +107,7 @@ Panel_Admin_Buttons = [
     [create_button("💳 تنظیمات درگاه"), create_button("👥 آمار گیری")],
     [create_button("📚 منوی پنل ها"), create_button("⚙️ تنظیمات ربات")],
     [create_button("🎟 کدتخفیف"), create_button("🗞 ساخت پلن")],
+    [create_button("🏢 پلن نمایندگی")],
     [create_button("👤 مدیریت کاربر"), create_button("📮 ارسال همگانی")],
     [create_button("📥 فوروارد همگانی")],
     [create_button("➖ کسر موجودی"), create_button("➕ افزودن موجودی")],

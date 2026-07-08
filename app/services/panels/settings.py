@@ -48,6 +48,7 @@ DEFAULT_SUBSCRIPTION_SETTINGS: dict[str, Any] = {
     "show_prefixes_in_locations": True,
     "link_mode": "both",
     "single_config_link_indexes": "",
+    "admin_login_path": "",
 }
 
 DEFAULT_TEST_SETTINGS: dict[str, Any] = {
@@ -80,6 +81,7 @@ LEGACY_FIELD_TO_JSON: dict[str, tuple[str, str]] = {
     "show_prefixes_in_locations": ("subscription_settings", "show_prefixes_in_locations"),
     "subscription_link_mode": ("subscription_settings", "link_mode"),
     "single_config_link_indexes": ("subscription_settings", "single_config_link_indexes"),
+    "admin_login_path": ("subscription_settings", "admin_login_path"),
     "test_volume_gb": ("test_settings", "volume_gb"),
     "test_duration_days": ("test_settings", "duration_days"),
     "webhook_notifications_enabled": ("renewal_settings", "webhook_notifications_enabled"),
@@ -510,6 +512,20 @@ def panel_user_limit(panel) -> int | None:
         return int(value)
     except TypeError, ValueError:
         return None
+
+
+def panel_admin_login_path(panel) -> str:
+    return str(subscription_settings(panel).get("admin_login_path") or "").strip()
+
+
+def get_panel_login_url(panel) -> str:
+    base = (panel.base_url or "").rstrip("/")
+    extra = panel_admin_login_path(panel)
+    if not extra:
+        return base
+    if extra.startswith("http://") or extra.startswith("https://"):
+        return extra.rstrip("/")
+    return f"{base}/{extra.lstrip('/')}"
 
 
 def panel_subscription_link_mode(panel) -> str:

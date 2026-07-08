@@ -1,0 +1,114 @@
+"""Reseller purchase inline keyboards."""
+
+from telethon import Button
+
+from app.telegram.keyboards import reseller as rs_buttons
+from app.telegram.keyboards.common import styled_callback_button
+from app.telegram.shared.keyboards.plan_buttons import resolve_plan_button_style
+from app.telegram.user.reseller.helpers import format_plan_button_text, is_admin_locked
+
+
+async def build_reseller_plan_buttons(plans) -> list:
+    rows = []
+    for plan in plans:
+        text = format_plan_button_text(plan)
+        style = resolve_plan_button_style(plan)
+        rows.append([styled_callback_button(text, f"ResellerPlan_{plan.id}", style)])
+    rows.append([await rs_buttons.rs_buy_cancel_button()])
+    return rows
+
+
+async def build_reseller_confirm_buttons(*, show_discount: bool = False) -> list:
+    rows = []
+    if show_discount:
+        rows.append([await rs_buttons.rs_buy_discount_button()])
+    rows.extend(
+        [
+            [await rs_buttons.rs_buy_confirm_button()],
+            [await rs_buttons.rs_buy_back_button("ResellerBuy_back_username")],
+            [await rs_buttons.rs_buy_cancel_button()],
+        ]
+    )
+    return rows
+
+
+async def build_reseller_renew_plan_buttons(account_code: int, plans) -> list:
+    rows = []
+    for plan in plans:
+        text = format_plan_button_text(plan)
+        style = resolve_plan_button_style(plan)
+        rows.append([styled_callback_button(text, f"ResellerAccount_renew_plan:{account_code}:{plan.id}", style)])
+    rows.append([Button.inline("🔙 بازگشت", data=f"ResellerAccount_view:{account_code}")])
+    return rows
+
+
+async def build_reseller_renew_confirm_buttons(account_code: int, plan_id: int) -> list:
+    return [
+        [await rs_buttons.rs_renew_discount_button(account_code, plan_id)],
+        [await rs_buttons.rs_renew_confirm_button(account_code, plan_id)],
+        [await rs_buttons.rs_renew_back_button(account_code)],
+    ]
+
+
+async def build_my_reseller_account_buttons(account) -> list:
+    rows = []
+    locked = is_admin_locked(account)
+
+    if not locked:
+        rows.append(
+            [
+                await rs_buttons.rs_show_creds_button(account.code),
+            ]
+        )
+        rows.append([await rs_buttons.rs_change_password_button(account.code)])
+
+    if not locked:
+        if account.status == "paused":
+            rows.append([await rs_buttons.rs_resume_button(account.code)])
+        elif account.status in ("active", "suspended"):
+            rows.append([await rs_buttons.rs_pause_button(account.code)])
+
+        if account.pricing_mode == "fixed":
+            rows.append([await rs_buttons.rs_renew_button(account.code)])
+
+        if account.pricing_mode == "usage":
+            rows.append([await rs_buttons.rs_usage_report_button(account.code)])
+
+    rows.append([await rs_buttons.rs_delete_button(account.code)])
+    rows.append([await rs_buttons.rs_back_list_button()])
+    return rows
+
+
+async def build_password_confirm_buttons(account_code: int) -> list:
+    return [
+        [await rs_buttons.rs_chpwd_confirm_button(account_code)],
+        [await rs_buttons.rs_chpwd_cancel_button(account_code)],
+    ]
+
+
+async def build_delete_confirm_buttons(account_code: int) -> list:
+    return [
+        [await rs_buttons.rs_delete_confirm_button(account_code)],
+        [await rs_buttons.rs_delete_cancel_button(account_code)],
+    ]
+
+
+async def build_usage_history_buttons(account_code: int, page: int, has_prev: bool, has_next: bool) -> list:
+    rows = []
+    nav = []
+    if has_prev:
+        nav.append(await rs_buttons.rs_usage_prev_button(account_code, page))
+    if has_next:
+        nav.append(await rs_buttons.rs_usage_next_button(account_code, page))
+    if nav:
+        rows.append(nav)
+    rows.append([await rs_buttons.rs_usage_back_button(account_code)])
+    return rows
+
+
+async def build_my_resellers_list_buttons(accounts) -> list:
+    rows = [
+        [Button.inline(f"🏢 {acc.username} · #{acc.code}", data=f"ResellerAccount_view:{acc.code}")] for acc in accounts
+    ]
+    rows.append([await rs_buttons.rs_close_list_button()])
+    return rows

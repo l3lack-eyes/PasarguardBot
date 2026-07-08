@@ -13,6 +13,7 @@ TEXT_SECTIONS = {
     "crypto_payment": {"name": "پرداخت ارزی", "icon": "💵"},
     "webhook": {"name": "اطلاع‌رسانی", "icon": "🔔"},
     "renewal": {"name": "تمدید سرویس", "icon": "🔄"},
+    "reseller": {"name": "نمایندگی", "icon": "🏢"},
     "other": {"name": "سایر", "icon": "📝"},
     "reserved_1": {"name": "رزرو 1", "icon": "🔲"},
     "reserved_2": {"name": "رزرو 2", "icon": "🔲"},
@@ -126,6 +127,12 @@ TEXT_KEYS_CONFIG = {
                 "new_price": "مبلغ جدید",
             },
         },
+    ],
+    "reseller": [
+        {"key": "reseller_my_list_intro", "title": "متن لیست نمایندگی‌های من", "placeholders": {"count": "تعداد"}},
+        {"key": "reseller_my_list_empty", "title": "پیام نبودن نمایندگی", "placeholders": {}},
+        {"key": "reseller_buy_panel_picker", "title": "متن انتخاب پنل (خرید)", "placeholders": {}},
+        {"key": "reseller_select_plan_prompt", "title": "متن انتخاب پلن", "placeholders": {"panel_name": "نام پنل"}},
     ],
     "balance": [
         {"key": "add_balance_intro", "title": "متن معرفی افزایش موجودی", "placeholders": {}},

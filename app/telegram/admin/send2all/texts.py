@@ -5,21 +5,24 @@ from app.services.telegram.rich_message import RICH_MESSAGE_DOCS_URL
 
 MODE_NAMES_EMOJI = {
     "active": "👥 کاربران فعال",
-    "users_with_active_service": "💎 مشتریان",
+    "users_with_active_service": "💎 مشتریان (دارای کانفیگ)",
+    "reseller_users": "🏢 نمایندگی‌ها",
     "blocked_users": "🚫 بلاک کننده‌ها",
     "banned_users": "🔒 بن شده‌ها",
 }
 
 MODE_NAMES_SETTINGS = {
     "active": "👥 کاربران فعال",
-    "users_with_active_service": "💎 همگانی به مشتریان",
+    "users_with_active_service": "💎 همگانی به مشتریان دارای کانفیگ",
+    "reseller_users": "🏢 همگانی به نمایندگی‌ها",
     "blocked_users": "🚫 کاربران بلاک کننده",
     "banned_users": "🔒 کاربران بن شده",
 }
 
 MODE_NAMES_PLAIN = {
     "active": "کاربران فعال",
-    "users_with_active_service": "کاربران با سرویس فعال",
+    "users_with_active_service": "مشتریان دارای کانفیگ فعال",
+    "reseller_users": "کاربران دارای نمایندگی",
     "blocked_users": "کاربران بلاک کرده",
     "banned_users": "کاربران بن شده",
 }

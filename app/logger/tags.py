@@ -42,6 +42,9 @@ class LogType(Enum):
     TRANSACTION_REJECTED = "transaction_rejected"
     TRANSACTION_EXPIRED = "transaction_expired"
 
+    # Reseller related logs
+    RESELLER = "reseller"
+
     # Service related logs
     SERVICE_CREATED = "service_created"
     SERVICE_DELETED = "service_deleted"

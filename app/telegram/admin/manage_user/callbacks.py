@@ -9,6 +9,18 @@ from pasarguard import PasarguardAPI, UserModify, UserResponse
 from telethon import Button, events
 
 from app.db.crud.panels import PanelsManager
+from app.db.crud.reseller_plans import ResellerPlanManager
+from app.services.billing.reseller_renewal import renew_reseller_account
+from app.services.panels.admins import get_reseller_admin, list_reseller_admin_users, reset_reseller_admin_password
+from app.services.reseller.logging import send_reseller_log
+from app.telegram.user.reseller.helpers import (
+    build_reseller_account_detail_text,
+    delete_reseller_account,
+    format_plan_button_text,
+    pause_reseller_account_by_admin,
+    resume_reseller_account_by_admin,
+)
+from app.db.crud.reseller_accounts import ResellerAccountCRUD
 from app.db.crud.services import ServiceCRUD
 from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserCRUD
@@ -25,6 +37,10 @@ from app.telegram.admin.manage_user.service import (
 )
 from app.telegram.keyboards.admin import (
     Home_Back,
+    build_admin_reseller_account_buttons,
+    build_admin_reseller_chpwd_confirm_buttons,
+    build_admin_reseller_delete_confirm_buttons,
+    build_admin_reseller_list_buttons,
     create_inline_manageuser,
 )
 from app.telegram.keyboards.services import create_inline_service_buttons
@@ -34,10 +50,235 @@ from app.telegram.state import delete_data, get_data, get_step, set_data, set_st
 from app.telegram.user.services.helpers import build_service_info_message_text, edit_service_view
 from app.utils.formatting.dates import Time_Date, timestamp_to_persian_expiry
 from app.utils.formatting.traffic import format_size
+from app.utils.security.crypto import encrypt_data
 from app.utils.text.bot_texts import get_bot_text
 from config import ADMIN_ID
 
 logger = get_logger(__name__)
+
+
+async def _admin_get_user_reseller(user_id: int, account_code: int):
+    ok, account = await ResellerAccountCRUD().get_account(account_code)
+    if not ok or account.telegram_id != user_id:
+        return None
+    return account
+
+
+async def _admin_show_reseller_detail(event, user_id: int, account) -> None:
+    text = await build_reseller_account_detail_text(account, show_password=False)
+    await event.edit(
+        text,
+        buttons=build_admin_reseller_account_buttons(user_id, account),
+        parse_mode="markdown",
+    )
+
+
+async def handle_admin_reseller_callbacks(event: events.CallbackQuery.Event, data: str) -> bool:
+    if not data.startswith("AdminReseller_"):
+        return False
+
+    parts = data.split(":")
+    action = parts[0].replace("AdminReseller_", "")
+    user_id = int(parts[1])
+    account_code = int(parts[2]) if len(parts) > 2 else None
+    plan_id = int(parts[3]) if len(parts) > 3 else None
+
+    if action == "view":
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        await _admin_show_reseller_detail(event, user_id, account)
+        return True
+
+    if action == "creds":
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        text = await build_reseller_account_detail_text(account, show_password=True)
+        await event.edit(
+            text,
+            buttons=build_admin_reseller_account_buttons(user_id, account),
+            parse_mode="markdown",
+        )
+        return True
+
+    if action == "pause":
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        ok, msg = await pause_reseller_account_by_admin(account, actor_id=event.sender_id)
+        await event.answer(msg, alert=True)
+        if ok:
+            ok, account = await ResellerAccountCRUD().get_account(account_code)
+            if ok:
+                await _admin_show_reseller_detail(event, user_id, account)
+        return True
+
+    if action == "resume":
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        ok, msg = await resume_reseller_account_by_admin(account, actor_id=event.sender_id)
+        await event.answer(msg, alert=True)
+        if ok:
+            ok, account = await ResellerAccountCRUD().get_account(account_code)
+            if ok:
+                await _admin_show_reseller_detail(event, user_id, account)
+        return True
+
+    if data.startswith("AdminReseller_delete:") and not data.startswith("AdminReseller_delete_confirm:"):
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
+        sub_users = 0
+        if panel:
+            try:
+                users = await list_reseller_admin_users(
+                    panel,
+                    admin_id=account.panel_admin_id,
+                    admin_username=account.username,
+                )
+                sub_users = len(users)
+            except Exception:
+                admin = await get_reseller_admin(panel, account.username)
+                sub_users = int(getattr(admin, "total_users", 0) or 0) if admin else 0
+        await event.edit(
+            f"**⚠️ حذف نمایندگی `{account.username}`**\n\n"
+            f"• ادمین پنل حذف می‌شود\n"
+            f"• `{sub_users}` یوزر وابسته حذف می‌شوند\n"
+            f"• این عمل غیرقابل بازگشت است",
+            buttons=build_admin_reseller_delete_confirm_buttons(user_id, account_code),
+            parse_mode="markdown",
+        )
+        return True
+
+    if data.startswith("AdminReseller_delete_confirm:"):
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        ok, msg = await delete_reseller_account(account, actor_id=event.sender_id, actor_role="ادمین")
+        await event.answer(msg, alert=True)
+        if ok:
+            accounts = await ResellerAccountCRUD().get_accounts_by_user(user_id)
+            if accounts:
+                await event.edit(
+                    f"**🏢 نمایندگی‌های کاربر `{user_id}`** ({len(accounts)} مورد)\n\nیک نمایندگی را انتخاب کنید:",
+                    buttons=build_admin_reseller_list_buttons(user_id, accounts),
+                    parse_mode="markdown",
+                )
+            else:
+                await event.edit(
+                    f"**🏢 نمایندگی‌های کاربر `{user_id}`**\n\nنمایندگی فعالی ندارد.",
+                    buttons=[[Button.inline("🔙 بازگشت", data=f"BackToUserManagement:{user_id}")]],
+                    parse_mode="markdown",
+                )
+        return True
+
+    if action == "chpwd":
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        await event.edit(
+            f"**⚠️ تغییر رمز `{account.username}`**\n\nرمز جدید ساخته می‌شود. ادامه می‌دهید؟",
+            buttons=build_admin_reseller_chpwd_confirm_buttons(user_id, account_code),
+            parse_mode="markdown",
+        )
+        return True
+
+    if data.startswith("AdminReseller_chpwd_confirm:"):
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
+        if not panel:
+            await event.answer("پنل یافت نشد.", alert=True)
+            return True
+        try:
+            new_password = await reset_reseller_admin_password(panel, account.username)
+        except Exception as exc:
+            logger.error("admin reseller password reset failed: %s", exc)
+            await event.answer("خطا در تغییر رمز.", alert=True)
+            return True
+        await ResellerAccountCRUD().update_account(account.code, password_encrypted=encrypt_data(new_password))
+        await send_reseller_log(
+            "🔑 تغییر رمز نمایندگی توسط ادمین",
+            account=account,
+            actor_id=event.sender_id,
+            actor_role="ادمین",
+        )
+        ok, account = await ResellerAccountCRUD().get_account(account_code)
+        if ok:
+            text = await build_reseller_account_detail_text(account, show_password=True)
+            await event.edit(
+                text,
+                buttons=build_admin_reseller_account_buttons(user_id, account),
+                parse_mode="markdown",
+            )
+        await event.answer("✅ رمز جدید اعمال شد.", alert=False)
+        return True
+
+    if data.startswith("AdminReseller_renew_plan:"):
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        plan = await ResellerPlanManager().get_plan(plan_id)
+        if not plan or plan.pricing_mode != "fixed":
+            await event.answer("پلن نامعتبر است.", alert=True)
+            return True
+        success, msg = await renew_reseller_account(
+            account_code,
+            plan_id,
+            user_id,
+            actor_id=event.sender_id,
+            actor_role="ادمین",
+        )
+        await event.answer(msg, alert=True)
+        if success:
+            ok, account = await ResellerAccountCRUD().get_account(account_code)
+            if ok:
+                await _admin_show_reseller_detail(event, user_id, account)
+        return True
+
+    if data.startswith("AdminReseller_renew:"):
+        account = await _admin_get_user_reseller(user_id, account_code)
+        if not account:
+            await event.answer("نمایندگی یافت نشد.", alert=True)
+            return True
+        plans = [
+            p
+            for p in await ResellerPlanManager().get_all_plans(panel_code=account.panel_code, enabled_only=True)
+            if p.pricing_mode == "fixed"
+        ]
+        if not plans:
+            await event.answer("پلن ثابت فعالی نیست.", alert=True)
+            return True
+        rows = [
+            [
+                Button.inline(
+                    format_plan_button_text(plan), data=f"AdminReseller_renew_plan:{user_id}:{account_code}:{plan.id}"
+                )
+            ]
+            for plan in plans
+        ]
+        rows.append([Button.inline("🔙 بازگشت", data=f"AdminReseller_view:{user_id}:{account_code}")])
+        await event.edit(
+            f"**💎 تمدید `{account.username}`**\n\nپلن را انتخاب کنید:",
+            buttons=rows,
+            parse_mode="markdown",
+        )
+        return True
+
+    return False
 
 
 def is_manage_user_service_callback(data: str) -> bool:
@@ -419,6 +660,8 @@ async def handle_manage_user_service_callbacks(event: events.CallbackQuery.Event
 
 async def callback_manage_user_admin(event: events.CallbackQuery.Event):
     data = event.data.decode("UTF-8")
+    if await handle_admin_reseller_callbacks(event, data):
+        return
     if is_manage_user_service_callback(data):
         await handle_manage_user_service_callbacks(event, data)
         raise events.StopPropagation
@@ -427,6 +670,18 @@ async def callback_manage_user_admin(event: events.CallbackQuery.Event):
         Userid = int(data.split(":")[1])
 
         await display_user_services_Admin(event, Userid, current_page=1, original_event=event, edit_message=True)
+
+    elif await get_step(event.sender_id) == "MToUserInfo" and data.startswith("MToUser_resellers:"):
+        user_id = int(data.split(":")[1])
+        accounts = await ResellerAccountCRUD().get_accounts_by_user(user_id)
+        if not accounts:
+            await event.answer("نمایندگی‌ای یافت نشد.", alert=True)
+            return
+        await event.edit(
+            f"**🏢 نمایندگی‌های کاربر `{user_id}`** ({len(accounts)} مورد)\n\nیک نمایندگی را انتخاب کنید:",
+            buttons=build_admin_reseller_list_buttons(user_id, accounts),
+            parse_mode="markdown",
+        )
 
     elif data.startswith("AdminSearchConfig:"):
         target_user_id = int(data.split(":")[1])

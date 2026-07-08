@@ -58,6 +58,7 @@ PANEL_ADMIN_PREFIXES = (
     "panel_delete_confirm:",
     "clear_panel_tunnel_url:",
     "set_panel_tunnel_url:",
+    "set_panel_login_path:",
     "change_panel_name:",
     "prev:",
     "next:",

@@ -1687,7 +1687,20 @@ async def panel_admin_callback_handler(event: events.CallbackQuery.Event):
             await set_step(user_id=user_id, step="Menu_panels")
             await display_panels(user_id, current_page=1, edit_message=True, original_event=event)
 
-    if data.startswith("set_panel_tunnel_url:"):
+    elif data.startswith("set_panel_login_path:"):
+        panel_id = int(data.split(":")[1])
+        await event.edit(
+            "🔗 **مسیر ورود ادمین (برای نمایندگان)**\n\n"
+            "اگر API روی `https://domain.com` است ولی ورود ادمین روی `https://domain.com/admin` است،\n"
+            "فقط `admin` را ارسال کنید.\n"
+            "برای پاک کردن، `-` بفرستید.",
+            buttons=[Button.inline("❌ انصراف", data=f"panel_info:{panel_id}")],
+            parse_mode="markdown",
+        )
+        await set_step(event.sender_id, "SetPanelLoginPath")
+        await set_data(event.sender_id, "SetPanelLoginPath", panel_id)
+
+    elif data.startswith("set_panel_tunnel_url:"):
         parts = data.split(":")
         panel_id = int(parts[1])
         await event.edit(

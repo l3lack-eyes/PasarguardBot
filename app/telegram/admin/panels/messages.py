@@ -96,6 +96,19 @@ async def panel_admin_message_handler(event: Message):
     info = await UserCRUD().read_user(user_id)
     lang = info.language if info and info.language else "fa"
 
+    if step == "SetPanelLoginPath" and msg:
+        await delete_message(event, offset=-1)
+        id_panel = await get_data(event.sender_id, "SetPanelLoginPath")
+        login_path = "" if msg.strip() == "-" else msg.strip().rstrip("/")
+        await PanelsManager().update_panel(code=id_panel, admin_login_path=login_path)
+        await event.respond(
+            f"✅ مسیر ورود ادمین تنظیم شد:\n`{login_path or '(خالی — فقط base_url)'}`\n\nایدی پنل: {id_panel}",
+            buttons=[Button.inline("بازگشت", data=f"panel_info:{id_panel}")],
+        )
+        await clear_user(event.sender_id)
+        await set_step(event.sender_id, "panel")
+        return
+
     if step == "SetPanelTunnelUrl" and msg:
         await delete_message(event, offset=-1)
         id_panel = await get_data(event.sender_id, "SetPanelTunnelUrl")
@@ -155,7 +168,8 @@ async def panel_admin_message_handler(event: Message):
             entity=user_id,
             message=(
                 "🌐 آدرس پنل را ارسال کنید.\n"
-                "〰️ مثال: https://panel.example.com\n\n"
+                "〰️ مثال: `https://panel.example.com`\n"
+                "〰️ اگر پنل روی path نصب شده: `https://panel.example.com/admin`\n\n"
                 "لینک تانل یا آیپی ایران در این مرحله نیاز نیست؛ بعداً از تنظیمات همان پنل قابل تنظیم است."
             ),
         )

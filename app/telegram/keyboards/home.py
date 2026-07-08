@@ -54,31 +54,60 @@ async def bhome_buttons(user_id, lang):
     menu_admin_panel, menu_admin_panel_style = await _get_keyboard_button_config(
         keyboard_crud, "bt.menu_admin_panel", "⚙️ پنل مدیریت"
     )
-
-    bhome = [
-        [
-            styled_reply_button(menu_my_services, menu_my_services_style),
-            styled_reply_button(menu_buy_service, menu_buy_service_style),
-        ],
-        [
-            styled_reply_button(menu_profile, menu_profile_style),
-            styled_reply_button(menu_add_balance, menu_add_balance_style),
-        ],
-        [
-            styled_reply_button(menu_support, menu_support_style),
-            *(
-                []
-                if DISABLE_UPTIME_BUTTONS
-                else [styled_simple_webview_button(menu_uptime, LINK_UPTIME_BUTTONS, menu_uptime_style)]
-            ),
-            styled_reply_button(menu_help, menu_help_style),
-        ],
-    ]
+    menu_buy_reseller, menu_buy_reseller_style = await _get_keyboard_button_config(
+        keyboard_crud,
+        "bt.menu_buy_reseller",
+        "🏢 خرید پنل نمایندگی",
+        default_style="success",
+    )
+    menu_my_resellers, menu_my_resellers_style = await _get_keyboard_button_config(
+        keyboard_crud,
+        "bt.menu_my_resellers",
+        "📋 نمایندگی‌های من",
+        default_style="primary",
+    )
 
     user_data = await UserCRUD().read_user(user_id=user_id)
     setting = await SettingsManager().get_settings()
-    if user_data and user_data.tested == 0 and setting.test_mode == 1 and setting.test_panel_id != 0:
-        bhome.insert(0, [styled_reply_button(menu_get_trial, menu_get_trial_style)])
+    config_sale = bool(setting and setting.sale_mode)
+    reseller_sale = bool(setting and setting.reseller_sale_mode)
+
+    bhome: list[list] = []
+
+    if user_data and user_data.tested == 0 and setting and setting.test_mode == 1 and setting.test_panel_id != 0:
+        bhome.append([styled_reply_button(menu_get_trial, menu_get_trial_style)])
+
+    shop_row = []
+    if config_sale:
+        shop_row.append(styled_reply_button(menu_my_services, menu_my_services_style))
+        shop_row.append(styled_reply_button(menu_buy_service, menu_buy_service_style))
+    if shop_row:
+        bhome.append(shop_row)
+
+    reseller_row = []
+    if reseller_sale:
+        reseller_row.append(styled_reply_button(menu_my_resellers, menu_my_resellers_style))
+        reseller_row.append(styled_reply_button(menu_buy_reseller, menu_buy_reseller_style))
+    if reseller_row:
+        bhome.append(reseller_row)
+
+    bhome.extend(
+        [
+            [
+                styled_reply_button(menu_profile, menu_profile_style),
+                styled_reply_button(menu_add_balance, menu_add_balance_style),
+            ],
+            [
+                styled_reply_button(menu_support, menu_support_style),
+                *(
+                    []
+                    if DISABLE_UPTIME_BUTTONS
+                    else [styled_simple_webview_button(menu_uptime, LINK_UPTIME_BUTTONS, menu_uptime_style)]
+                ),
+                styled_reply_button(menu_help, menu_help_style),
+            ],
+        ]
+    )
 
     if user_id in ADMIN_ID:
         bhome.append([styled_reply_button(menu_admin_panel, menu_admin_panel_style)])

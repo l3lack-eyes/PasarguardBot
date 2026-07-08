@@ -48,3 +48,8 @@ class Settings(Base):
     manual_bonus_percent: Mapped[int | None] = mapped_column(Integer, nullable=False, server_default=text("0"))
     crypto_bonus_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     crypto_bonus_percent: Mapped[int | None] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    reseller_sale_mode: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    reseller_usage_billing_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    reseller_min_wallet_balance: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=False, server_default=text("100000")
+    )

@@ -175,6 +175,7 @@ def build_panel_admin_settings_buttons(panel: Any) -> list:
         rows.append([Button.inline("🔄 حذف لینک تانل", data=f"clear_panel_tunnel_url:{code}")])
     else:
         rows.append([Button.inline("➕ لینک تانل", data=f"set_panel_tunnel_url:{code}")])
+    rows.append([Button.inline("🔗 مسیر ورود ادمین", data=f"set_panel_login_path:{code}")])
     rows.append([glass_inline_button("📖 آموزش دکمه‌های تنظیمات پنل", data=f"panel_settings_help:{code}")])
     rows.append([Button.inline("❌ حذف پنل", data=f"panel_delete:{code}")])
     rows.append([Button.inline("🔙 لیست پنل‌ها", data="backPanel_list")])

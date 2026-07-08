@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 
 from app.db.base import AsyncSessionLocal as Session
 from app.db.models.broadcast import BroadcastJob
+from app.db.models.reseller_accounts import ResellerAccount
 from app.db.models.services import Service
 from app.db.models.user import User
 from app.logger import get_logger
@@ -221,6 +222,14 @@ class BroadcastJobCRUD:
                         .join(subquery, User.id == subquery.c.user_id)
                         .where(base_filter)
                     )
+                elif job.target_mode == "reseller_users":
+                    subquery = select(distinct(ResellerAccount.telegram_id).label("user_id")).subquery()
+                    query = (
+                        select(func.count(distinct(User.id)))
+                        .select_from(User)
+                        .join(subquery, User.id == subquery.c.user_id)
+                        .where(base_filter)
+                    )
                 elif job.target_mode == "blocked_users":
                     # Users who blocked the bot (step = BlockedBot)
                     query = select(func.count()).select_from(User).where(User.status == "BlockedBot")
@@ -288,6 +297,15 @@ class BroadcastJobCRUD:
                     ).subquery()
 
                     # Then join with User table and apply base filter
+                    query = (
+                        select(User)
+                        .join(subquery, User.id == subquery.c.user_id)
+                        .where(base_filter)
+                        .order_by(User.id)
+                        .limit(batch_size)
+                    )
+                elif job.target_mode == "reseller_users":
+                    subquery = select(distinct(ResellerAccount.telegram_id).label("user_id")).subquery()
                     query = (
                         select(User)
                         .join(subquery, User.id == subquery.c.user_id)

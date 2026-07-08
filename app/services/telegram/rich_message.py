@@ -13,6 +13,13 @@ from app import Kenzo
 
 RICH_MESSAGE_DOCS_URL = "https://core.telegram.org/bots/api#rich-message-formatting-options"
 
+# https://core.telegram.org/bots/api#rich-message-limits
+RICH_MESSAGE_MAX_BLOCKS = 500
+RICH_MESSAGE_SAFE_MARGIN = 5
+# Heading, summary, <details>, table header/separator, optional page footer.
+USAGE_HISTORY_RICH_OVERHEAD_BLOCKS = 10
+USAGE_HISTORY_PER_PAGE = RICH_MESSAGE_MAX_BLOCKS - USAGE_HISTORY_RICH_OVERHEAD_BLOCKS - RICH_MESSAGE_SAFE_MARGIN
+
 _SUPPORTED_SCHEMES = frozenset({"http", "https", "tg", "mailto", "tel"})
 _MARKDOWN_LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
 _MEDIA_EMBED_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")

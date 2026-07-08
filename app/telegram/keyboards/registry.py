@@ -4,6 +4,8 @@ KEYBOARD_BUTTON_TITLES = {
     "bt.menu_my_services": "سرویس های من",
     "bt.menu_get_trial": "دریافت تست",
     "bt.menu_buy_service": "خرید سرویس",
+    "bt.menu_buy_reseller": "خرید پنل نمایندگی",
+    "bt.menu_my_resellers": "نمایندگی‌های من",
     "bt.menu_profile": "پروفایل من",
     "bt.menu_add_balance": "افزایش موجودی",
     "bt.menu_support": "پشتیبانی",
@@ -49,6 +51,16 @@ KEYBOARD_BUTTON_TITLES = {
     "in.buy.default_username": "اسم پیشفرض ربات",
     "in.buy.retry_username": "تغییر مجدد نام کانفیگ",
     "in.buy.empty_list": "خرید (بدون سرویس)",
+    "in.rs.show_creds": "نمایش رمز ورود",
+    "in.rs.change_password": "تغییر رمز عبور",
+    "in.rs.resume": "فعال‌سازی پنل",
+    "in.rs.pause": "غیرفعال‌سازی پنل",
+    "in.rs.renew": "تمدید نمایندگی",
+    "in.rs.usage_report": "گزارش مصرف",
+    "in.rs.delete": "حذف نمایندگی",
+    "in.rs.buy_random_username": "نام تصادفی (نمایندگی)",
+    "in.rs.delete_confirm": "تأیید حذف نمایندگی",
+    "in.rs.chpwd_confirm": "تأیید تغییر رمز",
 }
 
 
@@ -56,6 +68,8 @@ KEYBOARD_BUTTON_DEFAULTS = {
     "bt.menu_my_services": "🔑 سرویس های من",
     "bt.menu_get_trial": "🎁 دریافت تست",
     "bt.menu_buy_service": "🛍 خرید سرویس",
+    "bt.menu_buy_reseller": "🏢 خرید پنل نمایندگی",
+    "bt.menu_my_resellers": "📋 نمایندگی‌های من",
     "bt.menu_profile": "🙍 پروفایل من",
     "bt.menu_add_balance": "💰 افزایش موجودی",
     "bt.menu_support": "☎️ پشتیبانی",
@@ -101,6 +115,16 @@ KEYBOARD_BUTTON_DEFAULTS = {
     "in.buy.default_username": "🎲 اسم پیشفرض ربات",
     "in.buy.retry_username": "🔄 تغییر مجدد نام کانفیگ",
     "in.buy.empty_list": "🚀 خرید اکانت ویتوری",
+    "in.rs.show_creds": "🔑 نمایش رمز ورود",
+    "in.rs.change_password": "🔄 تغییر رمز عبور",
+    "in.rs.resume": "▶️ فعال‌سازی پنل",
+    "in.rs.pause": "⏸ غیرفعال‌سازی پنل",
+    "in.rs.renew": "💎 تمدید",
+    "in.rs.usage_report": "📊 گزارش مصرف",
+    "in.rs.delete": "🗑 حذف نمایندگی",
+    "in.rs.buy_random_username": "🎲 نام تصادفی",
+    "in.rs.delete_confirm": "✅ بله، کامل حذف شود",
+    "in.rs.chpwd_confirm": "✅ بله، رمز عوض شود",
 }
 
 

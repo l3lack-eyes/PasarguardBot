@@ -90,6 +90,10 @@ async def create_keyboard_buttons_admin_buttons(page: int = 1):
                     await _keyboard_admin_button(keyboard_crud, "bt.menu_buy_service", 1),
                 ],
                 [
+                    await _keyboard_admin_button(keyboard_crud, "bt.menu_my_resellers", 1),
+                    await _keyboard_admin_button(keyboard_crud, "bt.menu_buy_reseller", 1),
+                ],
+                [
                     await _keyboard_admin_button(keyboard_crud, "bt.menu_profile", 1),
                     await _keyboard_admin_button(keyboard_crud, "bt.menu_add_balance", 1),
                 ],
@@ -215,6 +219,39 @@ async def create_keyboard_buttons_admin_buttons(page: int = 1):
 
         navigation = []
         navigation.append(Button.inline("⬅️ صفحه قبلی", data="keyboard_page:3"))
+        navigation.append(Button.inline("➡️ صفحه بعدی", data="keyboard_page:5"))
+        if navigation:
+            buttons.append(navigation)
+
+    elif page == 5:
+        buttons.extend(
+            [
+                [Button.inline("📋 ━━━━ دکمه‌های نمایندگی ━━━━", data="no_action")],
+                [
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.show_creds", 5),
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.change_password", 5),
+                ],
+                [
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.resume", 5),
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.pause", 5),
+                ],
+                [
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.renew", 5),
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.usage_report", 5),
+                ],
+                [
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.delete", 5),
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.buy_random_username", 5),
+                ],
+                [
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.delete_confirm", 5),
+                    await _keyboard_admin_button(keyboard_crud, "in.rs.chpwd_confirm", 5),
+                ],
+            ]
+        )
+
+        navigation = []
+        navigation.append(Button.inline("⬅️ صفحه قبلی", data="keyboard_page:4"))
         if navigation:
             buttons.append(navigation)
 
