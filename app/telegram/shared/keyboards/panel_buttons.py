@@ -10,6 +10,7 @@ from app.services.panels.settings import (
     panel_button_enabled,
     panel_display_mode,
     panel_renew_volume_remaining_mode,
+    panel_reseller_button_enabled,
     panel_reseller_sale_flag,
     panel_shop_sale_flag,
     panel_time_plans,
@@ -48,12 +49,26 @@ PANEL_MS_BUTTON_TOGGLES: tuple[tuple[str, str, str], ...] = (
 PANEL_MS_BTN_DEFAULTS: dict[str, bool] = {}
 
 
+# Reseller account-detail buttons are stored separately from service buttons.
+PANEL_MS_RESELLER_BUTTON_TOGGLES: tuple[tuple[str, str], ...] = (
+    ("credentials", "🔑 نمایش رمز ورود"),
+    ("change_password", "🔐 تغییر رمز عبور"),
+    ("toggle_status", "🕹 فعال/غیرفعال سازی پنل"),
+    ("usage_report", "📊 گزارش مصرف"),
+    ("delete", "🗑 حذف نمایندگی"),
+)
+
+
 def panel_ms_btn_default(attr: str) -> bool:
     return PANEL_MS_BTN_DEFAULTS.get(attr, True)
 
 
 def _panel_ms_btn_flag(panel: Any, attr: str) -> str:
     return "✅" if panel_button_enabled(panel, attr) else "❌"
+
+
+def _panel_ms_reseller_btn_flag(panel: Any, key: str) -> str:
+    return "✅" if panel_reseller_button_enabled(panel, key) else "❌"
 
 
 def panel_ms_buttons_menu_text(panel: Any) -> str:
@@ -77,6 +92,16 @@ def build_panel_ms_buttons_menu(panel: Any) -> list:
                     data=f"panel_ms_btn:{key}:{code}",
                 )
                 for key, attr, label in chunk
+            ]
+        )
+    rows.append([Button.inline("🏢 دکمه‌های نمایندگی", data=f"panel_ms_reseller_header:{code}")])
+    for key, label in PANEL_MS_RESELLER_BUTTON_TOGGLES:
+        rows.append(
+            [
+                Button.inline(
+                    f"{label} ({_panel_ms_reseller_btn_flag(panel, key)})",
+                    data=f"panel_ms_reseller_btn:{key}:{code}",
+                )
             ]
         )
     rows.append([glass_inline_button("🔙 بازگشت به پنل", data=f"panel_info:{code}")])

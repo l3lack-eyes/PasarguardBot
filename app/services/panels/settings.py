@@ -70,6 +70,16 @@ DEFAULT_FEATURE_SALES: dict[str, bool] = {
     "reseller_enabled": True,
 }
 
+FEATURE_RESELLER_BUTTONS = "reseller_buttons"
+
+DEFAULT_RESELLER_BUTTON_SETTINGS: dict[str, bool] = {
+    "credentials": True,
+    "change_password": True,
+    "toggle_status": True,
+    "usage_report": True,
+    "delete": True,
+}
+
 JSON_SETTING_COLUMNS = (
     "button_settings",
     "subscription_settings",
@@ -156,6 +166,36 @@ def panel_reseller_sale_enabled(panel) -> bool:
     return bool(panel and panel.enable and panel_reseller_sale_flag(panel))
 
 
+def panel_reseller_button_settings(panel) -> dict[str, bool]:
+    raw = feature_settings(panel).get(FEATURE_RESELLER_BUTTONS)
+    if not isinstance(raw, dict):
+        return copy.deepcopy(DEFAULT_RESELLER_BUTTON_SETTINGS)
+    merged = copy.deepcopy(DEFAULT_RESELLER_BUTTON_SETTINGS)
+    merged.update({key: bool(value) for key, value in raw.items() if key in DEFAULT_RESELLER_BUTTON_SETTINGS})
+    return merged
+
+
+def panel_reseller_button_enabled(panel, key: str) -> bool:
+    return bool(panel_reseller_button_settings(panel).get(key, True))
+
+
+def toggle_panel_reseller_button_setting(settings: dict[str, Any], key: str) -> None:
+    buttons = panel_reseller_button_settings_from_feature(settings)
+    if key not in buttons:
+        return
+    buttons[key] = not buttons[key]
+    settings[FEATURE_RESELLER_BUTTONS] = buttons
+
+
+def panel_reseller_button_settings_from_feature(settings: dict[str, Any]) -> dict[str, bool]:
+    raw = settings.get(FEATURE_RESELLER_BUTTONS)
+    if not isinstance(raw, dict):
+        return copy.deepcopy(DEFAULT_RESELLER_BUTTON_SETTINGS)
+    merged = copy.deepcopy(DEFAULT_RESELLER_BUTTON_SETTINGS)
+    merged.update({flag: bool(raw.get(flag, default)) for flag, default in DEFAULT_RESELLER_BUTTON_SETTINGS.items()})
+    return merged
+
+
 def toggle_panel_sales_setting(settings: dict[str, Any], key: str) -> None:
     sales = panel_sales_settings_from_feature(settings)
     sales[key] = not sales[key]
@@ -237,6 +277,10 @@ def compact_feature_settings(settings: dict[str, Any]) -> dict[str, Any]:
             sales = {flag: bool(value[flag]) for flag in DEFAULT_FEATURE_SALES if flag in value}
             if sales != DEFAULT_FEATURE_SALES:
                 compact[key] = sales
+        elif key == FEATURE_RESELLER_BUTTONS and isinstance(value, dict):
+            buttons = {flag: bool(value[flag]) for flag in DEFAULT_RESELLER_BUTTON_SETTINGS if flag in value}
+            if buttons != DEFAULT_RESELLER_BUTTON_SETTINGS:
+                compact[key] = buttons
         elif value not in (None, {}, []):
             compact[key] = value
     return compact

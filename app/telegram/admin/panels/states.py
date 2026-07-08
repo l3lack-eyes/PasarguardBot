@@ -29,6 +29,8 @@ PANEL_ADMIN_PREFIXES = (
     "panel_btn_hajm:",
     "panel_ms_buttons:",
     "panel_ms_btn:",
+    "panel_ms_reseller_header:",
+    "panel_ms_reseller_btn:",
     "panel_webhook_notifications:",
     "panel_renew_volume_mode:",
     "panel_settings_help:",

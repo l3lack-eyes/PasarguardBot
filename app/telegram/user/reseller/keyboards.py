@@ -2,6 +2,8 @@
 
 from telethon import Button
 
+from app.db.crud.panels import PanelsManager
+from app.services.panels.settings import panel_reseller_button_enabled
 from app.telegram.keyboards import reseller as rs_buttons
 from app.telegram.keyboards.common import styled_callback_button
 from app.telegram.shared.keyboards.plan_buttons import resolve_plan_button_style
@@ -53,28 +55,32 @@ async def build_reseller_renew_confirm_buttons(account_code: int, plan_id: int) 
 async def build_my_reseller_account_buttons(account) -> list:
     rows = []
     locked = is_admin_locked(account)
+    panel = await PanelsManager().get_panel_by_code(account.panel_code)
+
+    def enabled(key: str) -> bool:
+        return panel_reseller_button_enabled(panel, key) if panel else True
 
     if not locked:
-        rows.append(
-            [
-                await rs_buttons.rs_show_creds_button(account.code),
-            ]
-        )
-        rows.append([await rs_buttons.rs_change_password_button(account.code)])
+        if enabled("credentials"):
+            rows.append([await rs_buttons.rs_show_creds_button(account.code)])
+        if enabled("change_password"):
+            rows.append([await rs_buttons.rs_change_password_button(account.code)])
 
     if not locked:
-        if account.status == "paused":
-            rows.append([await rs_buttons.rs_resume_button(account.code)])
-        elif account.status in ("active", "suspended"):
-            rows.append([await rs_buttons.rs_pause_button(account.code)])
+        if enabled("toggle_status"):
+            if account.status == "paused":
+                rows.append([await rs_buttons.rs_resume_button(account.code)])
+            elif account.status in ("active", "suspended"):
+                rows.append([await rs_buttons.rs_pause_button(account.code)])
 
         if account.pricing_mode == "fixed":
             rows.append([await rs_buttons.rs_renew_button(account.code)])
 
-        if account.pricing_mode == "usage":
+        if account.pricing_mode == "usage" and enabled("usage_report"):
             rows.append([await rs_buttons.rs_usage_report_button(account.code)])
 
-    rows.append([await rs_buttons.rs_delete_button(account.code)])
+    if enabled("delete"):
+        rows.append([await rs_buttons.rs_delete_button(account.code)])
     rows.append([await rs_buttons.rs_back_list_button()])
     return rows
 

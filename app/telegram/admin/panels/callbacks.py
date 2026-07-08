@@ -50,6 +50,7 @@ from app.services.panels.settings import (
     panel_display_mode,
     panel_node_prefixes,
     panel_renew_volume_remaining_mode,
+    panel_reseller_button_settings,
     panel_reseller_sale_flag,
     panel_shop_sale_flag,
     panel_show_prefixes_in_locations,
@@ -57,6 +58,7 @@ from app.services.panels.settings import (
     panel_user_limit,
     panel_webhook_notifications_enabled,
     subscription_settings,
+    toggle_panel_reseller_button_setting,
     toggle_panel_sales_setting,
     update_time_plan_in_feature_settings,
     update_volume_plan_in_feature_settings,
@@ -78,6 +80,7 @@ from app.telegram.keyboards.admin import panel_xui_buttons
 from app.telegram.keyboards.registry import STYLE_LABELS
 from app.telegram.shared.keyboards.panel_buttons import (
     PANEL_MS_BUTTON_TOGGLES,
+    PANEL_MS_RESELLER_BUTTON_TOGGLES,
     build_panel_time_plan_info_buttons,
     build_panel_volume_plan_info_buttons,
     create_panel_display_config_submenu,
@@ -817,6 +820,38 @@ async def panel_admin_callback_handler(event: events.CallbackQuery.Event):
         if not panel:
             await event.answer("❌ پنل یافت نشد!", alert=True)
             return
+        status_text = "فعال ✅" if new_status else "غیرفعال ❌"
+        await event.answer(f"✅ {label} به {status_text} تغییر یافت!", alert=True)
+        await show_panel_ms_buttons_menu(event, panel)
+
+    elif data.startswith("panel_ms_reseller_header:"):
+        await event.answer("دکمه‌های نمایندگی جدا از دکمه‌های سرویس ذخیره می‌شوند.", alert=True)
+
+    elif data.startswith("panel_ms_reseller_btn:"):
+        parts = data.split(":")
+        if len(parts) != 3:
+            await event.answer("❌ درخواست نامعتبر است.", alert=True)
+            return
+        btn_key, panel_code_str = parts[1], parts[2]
+        toggle_map = dict(PANEL_MS_RESELLER_BUTTON_TOGGLES)
+        label = toggle_map.get(btn_key)
+        if not label:
+            await event.answer("❌ دکمه نمایندگی نامعتبر است.", alert=True)
+            return
+        panel_code = int(panel_code_str)
+
+        def _toggle_reseller_button(settings):
+            toggle_panel_reseller_button_setting(settings, btn_key)
+
+        if not await mutate_panel_feature_settings(panel_code, _toggle_reseller_button):
+            await event.answer("❌ خطا در ذخیره تنظیمات.", alert=True)
+            return
+
+        panel = await PanelsManager().get_panel_by_code(panel_code)
+        if not panel:
+            await event.answer("❌ پنل یافت نشد!", alert=True)
+            return
+        new_status = next(value for key, value in panel_reseller_button_settings(panel).items() if key == btn_key)
         status_text = "فعال ✅" if new_status else "غیرفعال ❌"
         await event.answer(f"✅ {label} به {status_text} تغییر یافت!", alert=True)
         await show_panel_ms_buttons_menu(event, panel)
