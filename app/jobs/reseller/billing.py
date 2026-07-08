@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pasarguard import AdminModify
 
@@ -25,7 +25,7 @@ from app.services.panels.admins import (
     purge_reseller_admin,
     suspend_reseller_admin,
 )
-from app.services.reseller.logging import send_reseller_log
+from app.services.reseller.logging import send_reseller_log, send_reseller_usage_charge_table
 from app.utils.formatting.conversions import gigabytes_to_bytes
 from app.utils.formatting.dates import Time_Date
 
@@ -49,6 +49,7 @@ class _BillingRunStats:
     purged: int = 0
     snapshots_purged: int = 0
     errors: int = 0
+    usage_charge_rows: list[dict] = field(default_factory=list)
 
 
 async def _resolve_plan(account):
@@ -236,16 +237,22 @@ async def _process_usage_account(
         status="active",
     )
     await snapshot_crud.add_snapshot(account.code, used_traffic, charge, now)
-    await send_reseller_log(
-        "📊 کسر مصرفی نمایندگی",
-        account=account,
-        extra_lines=[
-            f"💸 <b>مبلغ:</b> <code>{charge:,}</code> تومان",
-            f"📦 <b>مصرف جدید:</b> <code>{delta_gb:.3f}</code> GB",
-        ],
-    )
     if stats:
         stats.usage_charged += 1
+        stats.usage_charge_rows.append(
+            {
+                "code": account.code,
+                "username": account.username,
+                "telegram_id": account.telegram_id,
+                "panel_code": account.panel_code,
+                "status": account.status,
+                "max_users": account.max_users or 0,
+                "usage_bytes": int(delta_bytes),
+                "charge": f"{charge:,}",
+            }
+        )
+        if len(stats.usage_charge_rows) > 150:
+            stats.usage_charge_rows = stats.usage_charge_rows[-150:]
 
 
 def _group_accounts_by_panel(accounts) -> dict[int, list]:
@@ -394,6 +401,8 @@ async def run_reseller_billing() -> None:
                 log.error("usage billing error code=%s: %s", account.code, exc)
 
     elapsed = time.time() - start_time
+    if stats.usage_charge_rows:
+        await send_reseller_usage_charge_table(stats.usage_charge_rows)
     log.info(
         f"{LogTag.JOB} reseller_billing | duration={elapsed:.2f}s, "
         f"hourly={stats.hourly_accounts}, usage={stats.usage_accounts}, "
