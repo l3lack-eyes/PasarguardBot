@@ -79,3 +79,31 @@ async def trx_arz_update():
         logger.error("Unexpected error in trx_arz_update: %s", e)
 
     return False
+
+
+async def ton_arz_update():
+    try:
+        url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=ton&dstCurrency=rls"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=120)
+        if response.status_code != 200:
+            logger.error("Error fetching TON price: %s", response.status_code)
+            return False
+
+        data = response.json()
+        stats = data.get("stats", {}).get("ton-rls", {})
+        if data.get("status") != "ok" or "bestSell" not in stats:
+            logger.error("TON data not found or status not OK.")
+            return False
+
+        price = stats["bestSell"]
+        return int(price[:-1])
+
+    except httpx.RequestError as e:
+        logger.error("Network error while fetching TON price: %s", e)
+    except ValueError as e:
+        logger.error("Error parsing TON price: %s", e)
+    except Exception as e:
+        logger.error("Unexpected error in ton_arz_update: %s", e)
+
+    return False
