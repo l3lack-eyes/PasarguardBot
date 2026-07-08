@@ -110,7 +110,7 @@ async def wallet_callback_handler(event: events.CallbackQuery.Event):
         wallet = await WalletCRUD().get_wallet_by_id(wallet_id)
         api_key_status = texts.WALLET_API_CONFIGURED if wallet.api_key else texts.WALLET_API_NOT_CONFIGURED
         await event.edit(
-            texts.WALLET_API_KEY_EDIT_PROMPT_TEMPLATE.format(api_key_status=api_key_status),
+            texts.wallet_api_key_prompt(wallet_type, api_key_status=api_key_status),
             buttons=keyboards.wallet_management_back_button(),
         )
 

@@ -8,16 +8,14 @@ WALLET_API_NOT_CONFIGURED = "❌ تنظیم نشده"
 
 WALLET_TYPE_NOT_FOUND_ERROR = "❌ خطا: نوع کیف پول یافت نشد. لطفاً دوباره تلاش کنید."
 WALLET_INFO_ERROR = "❌ خطا در دریافت اطلاعات. لطفاً دوباره تلاش کنید."
-WALLET_API_KEY_PROMPT = "API Key را ارسال کنید (یا برای رد شدن /skip ارسال کنید):"
+TRONSCAN_API_KEYS_URL = "https://tronscan.org/myaccount/apiKeys"
+TRON_WALLET_TYPES = frozenset({"TRX", "USDT"})
 WALLET_ADDRESS_PROMPT_TEMPLATE = "آدرس کیف پول {wallet_type} را ارسال کنید:"
 WALLET_DUPLICATE_ERROR_TEMPLATE = "❌ کیف پول {wallet_type} قبلاً اضافه شده است. نمی‌توانید کیف پول تکراری اضافه کنید."
 WALLET_ADDED_SUCCESS_TEMPLATE = "✅ کیف پول {wallet_type} با موفقیت اضافه شد."
 WALLET_ADD_FAILED = "❌ خطا در افزودن کیف پول. لطفاً دوباره تلاش کنید."
 WALLET_TYPE_SELECT_PROMPT_TEMPLATE = "نوع کیف پول را انتخاب کنید (فعلی: {current_type}):"
 WALLET_TYPE_CHANGE_BLOCKED_TEMPLATE = "❌ کیف پول {wallet_type} قبلاً اضافه شده است. نمی‌توانید به این نوع تغییر دهید."
-WALLET_API_KEY_EDIT_PROMPT_TEMPLATE = (
-    "API Key جدید را ارسال کنید (یا برای رد شدن /skip ارسال کنید) (فعلی: {api_key_status}):"
-)
 WALLET_UPDATED_SUCCESS_TEMPLATE = "✅ کیف پول {wallet_type} با موفقیت بروزرسانی شد."
 WALLET_UPDATE_FAILED = "❌ خطا در بروزرسانی کیف پول. لطفاً دوباره تلاش کنید."
 WALLET_DELETED_SUCCESS = "✅ کیف پول با موفقیت حذف شد."
@@ -55,6 +53,23 @@ GROUP_CHARGE_NO_USERS = "❌ **شارژ گروهی**\n\nهیچ کاربری یا
 
 ALL_USERS_LABEL = "تمام کاربرها"
 ACTIVE_SERVICE_USERS_LABEL = "کاربرهای دارای سرویس فعال"
+
+
+def wallet_api_key_prompt(wallet_type: str | None = None, *, api_key_status: str | None = None) -> str:
+    kind = (wallet_type or "").upper()
+    if kind in TRON_WALLET_TYPES:
+        text = (
+            f"🔑 API Key برای {kind} (اختیاری)\n\n"
+            "کلید را از TronScan بگیرید:\n"
+            f"{TRONSCAN_API_KEYS_URL}\n\n"
+            "API Key را ارسال کنید یا برای رد شدن /skip بفرستید."
+        )
+    else:
+        text = "API Key را ارسال کنید (اختیاری — برای رد شدن /skip ارسال کنید):"
+
+    if api_key_status is not None:
+        text += f"\n\nوضعیت فعلی: {api_key_status}"
+    return text
 
 
 def wallet_menu_line(wallet) -> str:

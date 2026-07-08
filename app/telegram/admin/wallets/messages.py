@@ -52,7 +52,7 @@ async def wallet_message_handler(event: Message):
 
         await set_data(user_id, "wallet_address", msg)
         await set_step(user_id, states.ADD_WALLET_API_KEY_STEP)
-        await event.respond(texts.WALLET_API_KEY_PROMPT)
+        await event.respond(texts.wallet_api_key_prompt(wallet_type))
 
     elif await get_step(user_id) == states.ADD_WALLET_API_KEY_STEP and msg:
         address = await get_data(user_id, "wallet_address")
