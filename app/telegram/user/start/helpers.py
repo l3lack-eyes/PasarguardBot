@@ -7,6 +7,7 @@ from telethon.tl.custom import Message
 
 from app import Kenzo
 from app.db.crud.user import UserCRUD, add_user, get_user_status
+from app.db.redis import get_redis
 from app.logger import get_logger
 from app.services.billing.sticky_discount import (
     apply_sticky_discount,
@@ -23,12 +24,14 @@ from app.telegram.shared.guards.channel_gate import (
     is_reserved_start_param,
 )
 from app.telegram.shared.start_params import find_app_key_by_start_param, is_welcome_start_param
+from app.telegram.state.keys import get_redis_namespace
 from app.utils.formatting.dates import Time_Date
 from app.utils.text.bot_texts import get_bot_text
 
 logger = get_logger(__name__)
 
 BOT_LANGUAGE = "fa"
+_START_REACTION_KEY = "feature:start_reaction"
 
 
 DEFAULT_START_MESSAGE = (
@@ -50,6 +53,36 @@ async def fetch_welcome_text() -> str:
     return await get_bot_text(key="start_message", default=DEFAULT_START_MESSAGE, lang="fa")
 
 
+def _start_reaction_redis_key() -> str:
+    return f"{get_redis_namespace()}:{_START_REACTION_KEY}"
+
+
+async def is_start_reaction_enabled() -> bool:
+    redis = await get_redis()
+    if redis is None:
+        return True
+    try:
+        value = await redis.get(_start_reaction_redis_key())
+    except Exception as exc:
+        logger.warning("Redis get start_reaction: %s", exc)
+        return True
+    if value is None:
+        return True
+    return value not in {"0", "false", "False", "off", "OFF"}
+
+
+async def toggle_start_reaction() -> bool:
+    enabled = not await is_start_reaction_enabled()
+    redis = await get_redis()
+    if redis is None:
+        return enabled
+    try:
+        await redis.set(_start_reaction_redis_key(), "1" if enabled else "0")
+    except Exception as exc:
+        logger.warning("Redis set start_reaction: %s", exc)
+    return enabled
+
+
 def resolve_app_download_param(param: str | None) -> str | None:
     """Return app key when param triggers a download; welcome/legacy params are ignored."""
     if is_welcome_start_param(param):
@@ -58,25 +91,29 @@ def resolve_app_download_param(param: str | None) -> str | None:
 
 
 async def send_welcome_menu(event: Message, welcome_text: str, lang: str) -> None:
-    try:
-        await Kenzo(
-            functions.messages.SendReactionRequest(
-                peer=event.chat_id,
-                msg_id=event.id,
-                big=True,
-                reaction=[types.ReactionEmoji(emoticon="🔥")],
-                add_to_recent=False,
+    reaction_on = await is_start_reaction_enabled()
+    if reaction_on:
+        try:
+            await Kenzo(
+                functions.messages.SendReactionRequest(
+                    peer=event.chat_id,
+                    msg_id=event.id,
+                    big=True,
+                    reaction=[types.ReactionEmoji(emoticon="🔥")],
+                    add_to_recent=False,
+                )
             )
-        )
-    except Exception as exc:
-        logger.debug("Could not send reaction to message %s: %s", event.id, exc)
+        except Exception as exc:
+            logger.debug("Could not send reaction to message %s: %s", event.id, exc)
 
-    await Kenzo.send_message(
-        entity=event.sender_id,
-        message=welcome_text,
-        buttons=await bhome_buttons(event.sender_id, lang),
-        message_effect_id=5046509860389126442,  # 🎉
-    )
+    send_kwargs = {
+        "entity": event.sender_id,
+        "message": welcome_text,
+        "buttons": await bhome_buttons(event.sender_id, lang),
+    }
+    if reaction_on:
+        send_kwargs["message_effect_id"] = 5046509860389126442  # 🎉
+    await Kenzo.send_message(**send_kwargs)
 
 
 async def handle_discount_start_param(user_id: int, param: str | None, *, notify: bool = True) -> bool:

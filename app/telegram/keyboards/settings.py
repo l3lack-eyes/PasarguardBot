@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from app.logger import get_logger
+from app.telegram.user.start.helpers import is_start_reaction_enabled
 
 from .common import build_telegram_button_style, styled_callback_button
 
@@ -50,6 +51,7 @@ SETTINGS_MENU_SECTIONS = (
             SettingsMenuItem("وضعیت فروش", "sale_mode"),
             SettingsMenuItem("خرید تک‌پنل", "single_panel_buy_mode"),
             SettingsMenuItem("قفل کانال", "channel_lock"),
+            SettingsMenuItem("ری‌اکشن استارت", "start_reaction", default=True, wide=True),
             SettingsMenuItem("محدودیت IP درگاه", "ip_mode", wide=True),
         ),
         separate_page=False,
@@ -197,8 +199,11 @@ def _settings_nav_buttons(section_key: str) -> list:
     return row
 
 
-def _settings_toggle_button(settings, item: SettingsMenuItem):
-    value = bool(getattr(settings, item.attr, item.default))
+async def _settings_toggle_button(settings, item: SettingsMenuItem):
+    if item.attr == "start_reaction":
+        value = await is_start_reaction_enabled()
+    else:
+        value = bool(getattr(settings, item.attr, item.default))
     return styled_callback_button(
         item.label,
         f"settings.{item.attr}",
@@ -206,13 +211,13 @@ def _settings_toggle_button(settings, item: SettingsMenuItem):
     )
 
 
-def _append_settings_section(rows: list[list], settings, section: SettingsMenuSection) -> None:
+async def _append_settings_section(rows: list[list], settings, section: SettingsMenuSection) -> None:
     rows.append([_settings_header(section.title)])
     current_row = []
     columns = max(1, section.columns)
 
     for item in section.items:
-        button = _settings_toggle_button(settings, item)
+        button = await _settings_toggle_button(settings, item)
         if item.wide:
             if current_row:
                 rows.append(current_row)
@@ -229,13 +234,13 @@ def _append_settings_section(rows: list[list], settings, section: SettingsMenuSe
         rows.append(current_row)
 
 
-def create_buttons_settings(settings, section_key: str | None = None):
+async def create_buttons_settings(settings, section_key: str | None = None):
     logger.debug("Creating settings buttons")
 
     buttons: list[list] = []
     section = get_settings_menu_section(section_key)
     if section is not None:
-        _append_settings_section(buttons, settings, section)
+        await _append_settings_section(buttons, settings, section)
         buttons.append(_settings_nav_buttons(section.key))
         return buttons
 
@@ -244,6 +249,6 @@ def create_buttons_settings(settings, section_key: str | None = None):
             buttons.append([_settings_section_button(section)])
             continue
 
-        _append_settings_section(buttons, settings, section)
+        await _append_settings_section(buttons, settings, section)
 
     return buttons

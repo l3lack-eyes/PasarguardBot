@@ -37,13 +37,14 @@ from app.telegram.keyboards.texts import (
     create_text_sections_buttons,
 )
 from app.telegram.state import delete_data, get_data, get_step, set_data, set_step
+from app.telegram.user.start.helpers import toggle_start_reaction
 from config import ADMIN_ID
 
 logger = get_logger(__name__)
 
 
 async def _edit_settings_menu(event: events.CallbackQuery.Event, settings, section_key: str | None = None) -> None:
-    buttons = create_buttons_settings(settings, section_key=section_key)
+    buttons = await create_buttons_settings(settings, section_key=section_key)
     await event.edit(get_settings_menu_text(section_key), buttons=buttons)
 
 
@@ -86,11 +87,14 @@ async def callback_settings_toggle(event: events.CallbackQuery.Event):
             await event.answer("این گزینه تنظیمات پیدا نشد.", alert=True)
             return
 
-        current_value = bool(getattr(settings, setting_name, item.default))
-        update_kwargs = {setting_name: not current_value}
-        if setting_name == "pay_mode" and not current_value:
-            update_kwargs["manual_card_visibility"] = None
-        await SettingsManager().update_setting(settings.id, **update_kwargs)
+        if setting_name == "start_reaction":
+            await toggle_start_reaction()
+        else:
+            current_value = bool(getattr(settings, setting_name, item.default))
+            update_kwargs = {setting_name: not current_value}
+            if setting_name == "pay_mode" and not current_value:
+                update_kwargs["manual_card_visibility"] = None
+            await SettingsManager().update_setting(settings.id, **update_kwargs)
     except Exception as e:
         await event.answer(f"خطا در به‌روزرسانی تنظیمات: {e!s}", alert=True)
         return

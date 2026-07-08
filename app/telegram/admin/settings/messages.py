@@ -39,7 +39,7 @@ async def message_handler_settings(event: Message):
 
     logger.info("message_handler_settings")
     settings = await SettingsManager().get_settings()
-    buttons = create_buttons_settings(settings)
+    buttons = await create_buttons_settings(settings)
     await event.respond(get_settings_menu_text(), buttons=buttons)
 
 
