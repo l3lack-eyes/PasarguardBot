@@ -28,6 +28,7 @@ _SETTINGS_PAYMENT_EXACT_CALLBACKS = frozenset(
         "maar_add",
         "set_manual_limits",
         "set_crypto_limits",
+        "set_reseller_min_wallet",
         "bonus_settings_menu",
         "toggle_manual_bonus",
         "toggle_crypto_bonus",
@@ -210,6 +211,16 @@ async def callback_settings_payment(event: events.CallbackQuery.Event):
         await set_step(event.sender_id, "set_crypto_min")
         await event.edit(texts.CRYPTO_MIN_PROMPT, buttons=keyboards.back_to_settings_card_row())
         return
+
+    elif data == "set_reseller_min_wallet":
+        settings = await SettingsManager().get_settings()
+        current = int(settings.reseller_min_wallet_balance or 0)
+        await set_step(event.sender_id, "set_reseller_min_wallet")
+        await event.edit(
+            f"{texts.RESELLER_MIN_WALLET_PROMPT}\n\nمقدار فعلی: `{current:,}` تومان",
+            buttons=keyboards.back_to_settings_card_row(),
+        )
+
     elif data == "bonus_settings_menu":
         settings = await SettingsManager().get_settings()
         bonus_text, buttons = await keyboards.get_bonus_settings_menu(settings)

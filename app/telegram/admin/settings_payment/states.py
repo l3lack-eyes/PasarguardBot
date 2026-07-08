@@ -9,6 +9,7 @@ SET_MANUAL_MIN_STEP = "set_manual_min"
 SET_MANUAL_MAX_STEP = "set_manual_max"
 SET_CRYPTO_MIN_STEP = "set_crypto_min"
 SET_CRYPTO_MAX_STEP = "set_crypto_max"
+SET_RESELLER_MIN_WALLET_STEP = "set_reseller_min_wallet"
 
 SET_MANUAL_BONUS_PERCENT_STEP = "set_manual_bonus_percent"
 SET_CRYPTO_BONUS_PERCENT_STEP = "set_crypto_bonus_percent"
@@ -26,6 +27,7 @@ PAYMENT_INPUT_STEPS = frozenset(
         SET_MANUAL_MAX_STEP,
         SET_CRYPTO_MIN_STEP,
         SET_CRYPTO_MAX_STEP,
+        SET_RESELLER_MIN_WALLET_STEP,
         SET_MANUAL_BONUS_PERCENT_STEP,
         SET_CRYPTO_BONUS_PERCENT_STEP,
         MAAR_ADD_MIN_STEP,

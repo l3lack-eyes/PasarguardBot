@@ -106,6 +106,19 @@ async def message_handler_settings_payment(event: Message):
     elif await get_step(event.sender_id) == "set_crypto_max":
         await event.respond(texts.NUMERIC_ONLY)
 
+    elif await get_step(event.sender_id) == "set_reseller_min_wallet" and msg.isdigit():
+        settings = await SettingsManager().get_settings()
+        await SettingsManager().update_setting(
+            settings.id,
+            reseller_min_wallet_balance=int(msg),
+        )
+        await clear_user(event.sender_id)
+        await set_step(event.sender_id, "SettingsCardToCard")
+        await event.respond(texts.RESELLER_MIN_WALLET_SAVED, buttons=keyboards.back_to_settings_card_row())
+
+    elif await get_step(event.sender_id) == "set_reseller_min_wallet":
+        await event.respond(texts.NUMERIC_ONLY)
+
     elif await get_step(event.sender_id) == "set_manual_bonus_percent" and msg.isdigit():
         percent = int(msg)
         if percent < 0 or percent > 100:
