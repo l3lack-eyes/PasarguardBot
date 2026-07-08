@@ -1,6 +1,7 @@
 .git
 .github
 .venv
+venv
 __pycache__
 *.pyc
 *.pyo
@@ -8,11 +9,15 @@ __pycache__
 .ruff_cache
 .mypy_cache
 .vscode
+.idea
 logs
+backups
+*.bak
 *.session
 *.session-journal
 .env
 .env.*
+!.env.example
 NOTE.txt
 scripts
 README.md
