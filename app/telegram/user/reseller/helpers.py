@@ -142,27 +142,25 @@ async def build_reseller_panel_list_buttons(panel_codes: list) -> list:
     return buttons
 
 
-async def reseller_flow_edit(event, text: str, *, buttons=None, parse_mode: str = "markdown"):
+async def reseller_flow_edit(event, text: str, *, buttons=None):
     """Edit the active reseller purchase/renew bot message (works for callbacks and text replies)."""
     from telethon import events
 
     user_id = event.sender_id
     if isinstance(event, events.CallbackQuery.Event):
-        msg = await event.edit(text, buttons=buttons, parse_mode=parse_mode)
+        msg = await event.edit(text, buttons=buttons)
         await set_data(user_id, RESELLER_FLOW_MSG_KEY, str(msg.id))
         return msg
 
     msg_id = await get_data(user_id, RESELLER_FLOW_MSG_KEY)
     if msg_id:
         try:
-            msg = await event.client.edit_message(
-                event.chat_id, int(msg_id), text, buttons=buttons, parse_mode=parse_mode
-            )
+            msg = await event.client.edit_message(event.chat_id, int(msg_id), text, buttons=buttons)
             await set_data(user_id, RESELLER_FLOW_MSG_KEY, str(msg.id))
             return msg
         except Exception:
             pass
-    msg = await event.respond(text, buttons=buttons, parse_mode=parse_mode)
+    msg = await event.respond(text, buttons=buttons)
     await set_data(user_id, RESELLER_FLOW_MSG_KEY, str(msg.id))
     return msg
 
@@ -376,7 +374,7 @@ async def _complete_reseller_purchase(event, *, amount: int, discount_code: str 
         ],
     )
     await event.respond("✅", buttons=await bhome_buttons(user_id, lang))
-    await event.respond(success_text, parse_mode="markdown")
+    await event.respond(success_text)
 
 
 def generate_reseller_username(prefix: str = "res") -> str:
@@ -487,7 +485,7 @@ async def show_account_credentials(event, account) -> None:
 
     text = await build_reseller_account_detail_text(account, show_password=True)
     buttons = await build_my_reseller_account_buttons(account)
-    await event.edit(text, buttons=buttons, parse_mode="markdown")
+    await event.edit(text, buttons=buttons)
 
 
 async def show_account_detail(event, account) -> None:
@@ -495,7 +493,7 @@ async def show_account_detail(event, account) -> None:
 
     text = await build_reseller_account_detail_text(account, show_password=False)
     buttons = await build_my_reseller_account_buttons(account)
-    await event.edit(text, buttons=buttons, parse_mode="markdown")
+    await event.edit(text, buttons=buttons)
 
 
 async def pause_reseller_account(account) -> tuple[bool, str]:
@@ -738,4 +736,4 @@ async def show_usage_history(event, account, page: int = 0) -> None:
         )
     except Exception as exc:
         logger.error("reseller usage rich message failed code=%s: %s", account.code, exc)
-        await event.edit(prepared, buttons=buttons, parse_mode="markdown")
+        await event.edit(prepared, buttons=buttons)

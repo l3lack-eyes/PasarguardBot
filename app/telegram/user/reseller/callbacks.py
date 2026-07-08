@@ -282,7 +282,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
                 buttons=[[Button.inline("🏢 خرید پنل نمایندگی", data="ResellerBuy_start")]]
                 if await _reseller_sale_enabled()
                 else None,
-                parse_mode="markdown",
             )
             return
         await event.edit(
@@ -293,7 +292,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
                 count=str(len(accounts)),
             ),
             buttons=await build_my_resellers_list_buttons(accounts),
-            parse_mode="markdown",
         )
         return
 
@@ -379,7 +377,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
             f"• این عمل غیرقابل بازگشت است\n\n"
             "آیا مطمئن هستید؟",
             buttons=await build_delete_confirm_buttons(code),
-            parse_mode="markdown",
         )
         return
 
@@ -396,7 +393,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
                 await event.edit(
                     f"**📋 نمایندگی‌های من** ({len(accounts)} مورد)\n\nیک نمایندگی را انتخاب کنید:",
                     buttons=await build_my_resellers_list_buttons(accounts),
-                    parse_mode="markdown",
                 )
             else:
                 await event.edit(
@@ -404,7 +400,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
                     buttons=[[Button.inline("🏢 خرید پنل نمایندگی", data="ResellerBuy_start")]]
                     if await _reseller_sale_enabled()
                     else None,
-                    parse_mode="markdown",
                 )
         return
 
@@ -428,7 +423,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
         await event.edit(
             f"**⚠️ تغییر رمز `{acc.username}`**\n\nرمز فعلی پنل غیرفعال می‌شود و رمز جدید ساخته می‌شود.\nآیا مطمئن هستید؟",
             buttons=await build_password_confirm_buttons(code),
-            parse_mode="markdown",
         )
         return
 
@@ -560,7 +554,6 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
         await event.edit(
             f"**💎 تمدید `{acc.username}`**\n\nپلن تمدید را انتخاب کنید:",
             buttons=await build_reseller_renew_plan_buttons(acc.code, plans),
-            parse_mode="markdown",
         )
         return
 

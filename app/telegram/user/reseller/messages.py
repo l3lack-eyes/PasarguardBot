@@ -28,7 +28,6 @@ async def _send_my_resellers_list(event: Message) -> None:
                 event.sender_id,
             ),
             buttons=buttons or None,
-            parse_mode="markdown",
         )
         return
 
@@ -40,7 +39,6 @@ async def _send_my_resellers_list(event: Message) -> None:
             count=str(len(accounts)),
         ),
         buttons=await build_my_resellers_list_buttons(accounts),
-        parse_mode="markdown",
     )
 
 
