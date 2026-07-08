@@ -12,6 +12,8 @@ readonly SOURCE_DIR="/var/lib/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
+readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
+readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
 readonly PHPMYADMIN_PORT=6163
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -117,10 +119,92 @@ show_service_urls() {
     warn "Replace the IP with your domain if you use one."
 }
 
+get_installed_bot_version() {
+    local version tag
+    if [[ -d "$SOURCE_DIR/.git" ]]; then
+        tag="$(get_current_tag 2>/dev/null || true)"
+        if [[ -n "$tag" ]]; then
+            printf 'v%s' "$tag"
+            return 0
+        fi
+    fi
+    if [[ -f "${SOURCE_DIR}/pyproject.toml" ]]; then
+        version="$(
+            grep -E '^version = ' "${SOURCE_DIR}/pyproject.toml" 2>/dev/null \
+                | head -1 \
+                | sed -E 's/^version = "(.*)"/\1/'
+        )"
+        if [[ -n "$version" ]]; then
+            printf 'v%s' "$version"
+            return 0
+        fi
+    fi
+    printf '%s' '—'
+}
+
+get_remote_script_version() {
+    curl -fsSL --max-time 10 "$SCRIPT_RAW_URL" 2>/dev/null \
+        | grep -m1 '^readonly SCRIPT_VERSION=' \
+        | sed -E 's/^readonly SCRIPT_VERSION="(.*)"/\1/' \
+        || true
+}
+
+get_container_state() {
+    local name="$1"
+    docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || printf '%s' 'missing'
+}
+
+get_bot_runtime_summary() {
+    local running total bot_state
+    if ! command -v docker &>/dev/null || ! is_installed; then
+        printf '%s' '—'
+        return 0
+    fi
+    running="$(docker_compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')"
+    total="$(docker_compose ps -a -q 2>/dev/null | wc -l | tr -d ' ')"
+    bot_state="$(get_container_state pasarguardbot)"
+    printf '%s (%s/%s services running)' "$bot_state" "$running" "$total"
+}
+
+show_install_info() {
+    local installed_ver latest_tag remote_script_ver bot_runtime fastapi_port
+
+    echo -e "  ${C_DIM}Manager script:${C_RESET}  v${SCRIPT_VERSION}"
+
+    remote_script_ver="$(get_remote_script_version)"
+    if [[ -n "$remote_script_ver" && "$remote_script_ver" != "$SCRIPT_VERSION" ]]; then
+        echo -e "  ${C_DIM}Script latest:${C_RESET}   v${remote_script_ver} ${C_YELLOW}(update available)${C_RESET}"
+    fi
+
+    if is_installed; then
+        installed_ver="$(get_installed_bot_version)"
+        latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
+        bot_runtime="$(get_bot_runtime_summary)"
+        fastapi_port="$(get_env_value "FASTAPI_PORT")"
+        fastapi_port="${fastapi_port:-6160}"
+
+        echo -e "  ${C_DIM}Bot release:${C_RESET}    ${installed_ver}"
+        if [[ -n "$latest_tag" && "v${latest_tag}" != "$installed_ver" ]]; then
+            echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag} ${C_YELLOW}(update available)${C_RESET}"
+        elif [[ -n "$latest_tag" ]]; then
+            echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag}"
+        fi
+        echo -e "  ${C_DIM}Bot container:${C_RESET}  ${bot_runtime}"
+        echo -e "  ${C_DIM}API port:${C_RESET}        ${fastapi_port}"
+        echo -e "  ${C_DIM}Config:${C_RESET}          ${CONFIG_DIR}"
+        echo -e "  ${C_DIM}Source:${C_RESET}          ${SOURCE_DIR}"
+    else
+        latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
+        [[ -n "$latest_tag" ]] && echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag}"
+    fi
+    echo
+}
+
 draw_banner() {
     clear
     echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— Docker manager v${SCRIPT_VERSION}${C_RESET}"
     echo
+    show_install_info
 }
 
 draw_menu() {
@@ -134,12 +218,13 @@ draw_menu() {
     echo -e "${C_BOLD}  ┌─────────────────────────────────────────┐${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  1) Install bot                           ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  2) Uninstall bot                         ${C_BOLD}│${C_RESET}"
-    echo -e "${C_BOLD}  │${C_RESET}  3) Update bot                            ${C_BOLD}│${C_RESET}"
+    echo -e "${C_BOLD}  │${C_RESET}  3) Update bot (release tag)              ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  4) View logs                             ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  5) Edit .env file                        ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  6) Full restart                          ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  7) Service status                        ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  8) Show webhook & URLs                   ${C_BOLD}│${C_RESET}"
+    echo -e "${C_BOLD}  │${C_RESET}  9) Update manager script                 ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  0) Exit                                   ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  └─────────────────────────────────────────┘${C_RESET}"
     echo
@@ -373,9 +458,10 @@ cleanup_stale_resources() {
 install_manager_command() {
     local self
     self="$(readlink -f "${BASH_SOURCE[0]}")"
-    cp "$self" "${CONFIG_DIR}/pasarguardbot.sh"
-    chmod +x "${CONFIG_DIR}/pasarguardbot.sh"
-    ln -sf "${CONFIG_DIR}/pasarguardbot.sh" "$MANAGER_BIN"
+    mkdir -p "$CONFIG_DIR"
+    cp "$self" "$MANAGER_SCRIPT"
+    chmod +x "$MANAGER_SCRIPT"
+    ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
     ok "pasarguardbot command registered in PATH."
 }
 
@@ -498,6 +584,41 @@ action_update() {
     pause
 }
 
+action_update_script() {
+    draw_banner
+
+    local tmp new_ver old_ver
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' RETURN
+
+    info "Downloading latest manager script from GitHub..."
+    curl -fsSL --max-time 30 "$SCRIPT_RAW_URL" -o "$tmp" || die "Failed to download manager script."
+
+    head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || die "Downloaded file does not look like a valid script."
+
+    new_ver="$(grep -m1 '^readonly SCRIPT_VERSION=' "$tmp" | sed -E 's/^readonly SCRIPT_VERSION="(.*)"/\1/')"
+    old_ver="$SCRIPT_VERSION"
+
+    if [[ -z "$new_ver" ]]; then
+        die "Could not read SCRIPT_VERSION from downloaded script."
+    fi
+
+    if [[ "$new_ver" == "$old_ver" ]]; then
+        ok "Manager script is already up to date (v${old_ver})."
+        pause
+        return 0
+    fi
+
+    mkdir -p "$CONFIG_DIR"
+    cp "$tmp" "$MANAGER_SCRIPT"
+    chmod +x "$MANAGER_SCRIPT"
+    ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
+
+    ok "Manager script updated: v${old_ver} → v${new_ver}"
+    warn "Run pasarguardbot again to use the new script."
+    pause
+}
+
 action_logs() {
     draw_banner
     is_installed || die "Install the bot first (option 1)."
@@ -597,6 +718,7 @@ main_menu() {
             6) action_restart ;;
             7) action_status ;;
             8) action_urls ;;
+            9) action_update_script ;;
             0|q|Q) draw_banner; ok "Goodbye!"; exit 0 ;;
             *) warn "Invalid option."; sleep 1 ;;
         esac
@@ -606,14 +728,15 @@ main_menu() {
 case "${1:-}" in
     install)   require_root; action_install ;;
     uninstall) require_root; action_uninstall ;;
-    update)    require_root; action_update ;;
-    logs)      require_root; action_logs ;;
-    restart)   require_root; action_restart ;;
-    status)    require_root; action_status ;;
-    urls)      require_root; action_urls ;;
-    ""|menu)   require_root; main_menu ;;
+    update)         require_root; action_update ;;
+    update-script)  require_root; action_update_script ;;
+    logs)           require_root; action_logs ;;
+    restart)        require_root; action_restart ;;
+    status)         require_root; action_status ;;
+    urls)           require_root; action_urls ;;
+    ""|menu)        require_root; main_menu ;;
     *)
-        echo "Usage: pasarguardbot [install|uninstall|update|logs|restart|status|urls|menu]"
+        echo "Usage: pasarguardbot [install|uninstall|update|update-script|logs|restart|status|urls|menu]"
         exit 1
         ;;
 esac
