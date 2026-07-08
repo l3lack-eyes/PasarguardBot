@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ── Paths & repo ──────────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.0.1"
 readonly REPO_URL="https://github.com/AmirKenzo/PasarguardBot.git"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly SOURCE_DIR="/var/lib/pasarguardbot"
