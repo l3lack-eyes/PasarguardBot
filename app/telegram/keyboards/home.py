@@ -4,8 +4,10 @@ from telethon import Button
 from telethon.tl.types import KeyboardButtonRow, ReplyKeyboardMarkup
 
 from app.db.crud.keyboards import KeyboardButtonCRUD
+from app.db.crud.panels import PanelsManager
 from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserCRUD
+from app.services.panels.settings import panel_reseller_sale_enabled, panel_shop_sale_enabled
 from config import ADMIN_ID, DISABLE_UPTIME_BUTTONS, LINK_UPTIME_BUTTONS
 
 from .common import _get_keyboard_button_config, styled_reply_button, styled_simple_webview_button
@@ -69,8 +71,11 @@ async def bhome_buttons(user_id, lang):
 
     user_data = await UserCRUD().read_user(user_id=user_id)
     setting = await SettingsManager().get_settings()
-    config_sale = bool(setting and setting.sale_mode)
-    reseller_sale = bool(setting and setting.reseller_sale_mode)
+    panels = await PanelsManager().get_all_panels()
+    shop_sale = any(panel_shop_sale_enabled(panel) for panel in panels)
+    reseller_sale = bool(setting and setting.reseller_sale_mode) and any(
+        panel_reseller_sale_enabled(panel) for panel in panels
+    )
 
     bhome: list[list] = []
 
@@ -78,7 +83,7 @@ async def bhome_buttons(user_id, lang):
         bhome.append([styled_reply_button(menu_get_trial, menu_get_trial_style)])
 
     shop_row = []
-    if config_sale:
+    if shop_sale:
         shop_row.append(styled_reply_button(menu_my_services, menu_my_services_style))
         shop_row.append(styled_reply_button(menu_buy_service, menu_buy_service_style))
     if shop_row:

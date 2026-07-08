@@ -52,8 +52,8 @@ async def reseller_menu_message(event: Message):
     settings = await SettingsManager().get_settings()
 
     if msg == buy_text:
-        if not settings or not settings.reseller_sale_mode:
-            await event.respond("⛔️ فروش نمایندگی در حال حاضر غیرفعال است.")
+        if not settings or not settings.sale_mode or not settings.reseller_sale_mode:
+            await event.respond("⛔️ فروش توسط ادمین بسته است.")
             return
         step = (await get_step(event.sender_id)) or ""
         if step == "panel" or step.startswith("reseller_plan_"):

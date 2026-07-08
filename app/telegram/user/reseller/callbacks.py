@@ -79,7 +79,7 @@ async def _get_owned_account(event, code: int):
 
 async def _reseller_sale_enabled() -> bool:
     settings = await SettingsManager().get_settings()
-    return bool(settings and settings.reseller_sale_mode)
+    return bool(settings and settings.sale_mode and settings.reseller_sale_mode)
 
 
 async def _show_reseller_panel_picker(event) -> None:
@@ -153,7 +153,7 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
         and not data.startswith("ResellerMy")
         and not data.startswith("ResellerAccount_")
     ):
-        await event.answer("⛔️ فروش نمایندگی غیرفعال است.", alert=True)
+        await event.answer("⛔️ فروش توسط ادمین بسته است.", alert=True)
         return
 
     user_id = event.sender_id

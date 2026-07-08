@@ -58,7 +58,7 @@ async def buy_discount_code_filter(event: Message) -> bool:
 async def back_to_panels_callback(event: events.CallbackQuery.Event):
     setting = await SettingsManager().get_settings()
     if setting and not setting.sale_mode:
-        await event.answer("⛔️ فروش در حال حاضر غیرفعال است.", alert=True)
+        await event.answer("⛔️ فروش توسط ادمین بسته است.", alert=True)
         raise events.StopPropagation
     await show_buy_service_selection(event, lang=await _user_lang(event.sender_id), use_panel_rows=True)
     raise events.StopPropagation

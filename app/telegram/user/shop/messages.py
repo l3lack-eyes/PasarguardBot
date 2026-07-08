@@ -57,7 +57,7 @@ async def buy_service_handler(event: Message):
     lang = await _user_lang(user_id)
     setting = await SettingsManager().get_settings()
     if setting and not setting.sale_mode:
-        await event.respond("⛔️ فروش در حال حاضر غیرفعال است.", buttons=await bhome_buttons(user_id, lang))
+        await event.respond("⛔️ فروش توسط ادمین بسته است.", buttons=await bhome_buttons(user_id, lang))
         raise events.StopPropagation
 
     panel_manager = PanelsManager()
