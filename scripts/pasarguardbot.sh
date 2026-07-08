@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ── Paths & repo ──────────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_VERSION="1.0.3"
 readonly REPO_URL="https://github.com/AmirKenzo/PasarguardBot.git"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly SOURCE_DIR="/var/lib/pasarguardbot"
@@ -14,6 +14,7 @@ readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
+readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
 readonly PHPMYADMIN_PORT=6163
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -449,6 +450,12 @@ setup_compose() {
     ok "docker-compose.yml copied from source to ${COMPOSE_FILE}"
 }
 
+pull_bot_image() {
+    info "Pulling bot image ${BOT_IMAGE}:latest..."
+    docker pull "${BOT_IMAGE}:latest"
+    ok "Image ready: ${BOT_IMAGE}:latest"
+}
+
 cleanup_stale_resources() {
     docker rm -f pasarguardbot-redis pasarguardbot-mariadb pasarguardbot-phpmyadmin pasarguardbot 2>/dev/null || true
     docker volume rm pasarguardbot_mariadb_data pasarguardbot_redis_data 2>/dev/null || true
@@ -496,8 +503,7 @@ action_install() {
     install_manager_command
     cleanup_stale_resources
 
-    info "Building Docker image (this may take a few minutes)..."
-    docker_compose build --pull bot
+    pull_bot_image
 
     info "Starting services..."
     docker_compose up -d
@@ -510,6 +516,9 @@ action_install() {
     echo -e "  ${C_DIM}Source:${C_RESET}         ${SOURCE_DIR}"
     echo -e "  ${C_DIM}Logs:${C_RESET}           ${CONFIG_DIR}/logs"
     echo -e "  ${C_DIM}Data:${C_RESET}           ${CONFIG_DIR}/data"
+    echo
+    info "Image:"
+    echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:latest"
     echo
     info "Ports:"
     echo -e "  ${C_DIM}FastAPI:${C_RESET}      6160 (public)"
@@ -552,14 +561,16 @@ action_uninstall() {
             [[ "${confirm,,}" == "y" ]] || return 0
             docker_compose down --remove-orphans 2>/dev/null || true
             rm -rf "${CONFIG_DIR}/data"
-            docker rmi pasarguardbot:latest 2>/dev/null || true
+            docker rmi "${BOT_IMAGE}:latest" 2>/dev/null || true
             ok "Containers removed and data directory deleted."
             ;;
         3)
             read -r -p "Everything will be deleted! Type 'yes' to confirm: " confirm
             [[ "$confirm" == "yes" ]] || return 0
             docker_compose down --remove-orphans 2>/dev/null || true
-            docker rmi pasarguardbot:latest 2>/dev/null || true
+            while IFS= read -r img_id; do
+                [[ -n "$img_id" ]] && docker rmi "$img_id" 2>/dev/null || true
+            done < <(docker images "${BOT_IMAGE}" -q 2>/dev/null)
             rm -rf "$CONFIG_DIR" "$SOURCE_DIR"
             rm -f "$MANAGER_BIN"
             ok "All files removed."
@@ -585,14 +596,12 @@ action_update() {
     new_tag="${new_tag:-$latest}"
 
     setup_compose
+    pull_bot_image
 
-    info "Rebuilding image..."
-    docker_compose build --pull bot
+    info "Restarting services with the new image..."
+    docker_compose up -d --force-recreate --pull always
 
-    info "Restarting services..."
-    docker_compose up -d --force-recreate
-
-    ok "Update complete (v${old_tag} → v${new_tag})."
+    ok "Update complete (${old_tag} → ${new_tag})."
     pause
 }
 
@@ -679,6 +688,7 @@ action_edit_env() {
 }
 
 action_restart_quiet() {
+    docker_compose pull bot || true
     docker_compose down
     docker_compose up -d
     ok "Full restart completed."

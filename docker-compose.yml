@@ -60,10 +60,8 @@ services:
       - pasarguardbot
 
   bot:
-    build:
-      context: ${PASARGUARDBOT_SOURCE_DIR:-.}
-      dockerfile: Dockerfile
-    image: pasarguardbot:latest
+    image: ghcr.io/amirkenzo/pasarguardbot:latest
+    pull_policy: always
     container_name: pasarguardbot
     restart: unless-stopped
     env_file:
