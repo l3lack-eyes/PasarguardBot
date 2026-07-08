@@ -91,7 +91,7 @@ async def ton_arz_update():
             return False
 
         data = response.json()
-        stats = data.get("stats", {}).get("ton-rls", {})
+        stats = data.get("stats", {}).get("gram-rls", {})
         if data.get("status") != "ok" or "bestSell" not in stats:
             logger.error("TON data not found or status not OK.")
             return False
