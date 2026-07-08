@@ -83,7 +83,7 @@ async def trx_arz_update():
 
 async def ton_arz_update():
     try:
-        url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=ton&dstCurrency=rls"
+        url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=gram&dstCurrency=rls"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=120)
         if response.status_code != 200:
