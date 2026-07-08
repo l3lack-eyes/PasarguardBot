@@ -15,6 +15,7 @@ def register_all_jobs() -> None:
     if _JOBS_REGISTERED:
         return
 
+    from app.jobs.backup import bootstrap_backup_job, register_backup_job_placeholder
     from app.jobs.panels.cleanup import get_cookies
     from app.jobs.payments.transactions import (
         auto_confirm_job,
@@ -50,5 +51,14 @@ def register_all_jobs() -> None:
             **trigger_args,
         )
 
+    register_backup_job_placeholder()
+    scheduler.add_job(
+        bootstrap_backup_job,
+        "date",
+        run_date=now,
+        id="backup_bootstrap",
+        replace_existing=True,
+    )
+
     _JOBS_REGISTERED = True
-    logger.debug("%s Registered %s scheduled jobs", LogTag.SCHEDULER, len(job_defs))
+    logger.debug("%s Registered %s scheduled jobs (+ backup)", LogTag.SCHEDULER, len(job_defs))

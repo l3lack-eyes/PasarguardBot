@@ -60,6 +60,7 @@ class SettingsManager:
                         crypto_bonus_percent=0,
                         reseller_sale_mode=False,
                         reseller_min_wallet_balance=100000,
+                        backup_interval_hours=24,
                     )
                     session.add(default_settings)
                     await session.commit()

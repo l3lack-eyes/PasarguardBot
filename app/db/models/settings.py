@@ -53,3 +53,4 @@ class Settings(Base):
     reseller_min_wallet_balance: Mapped[int | None] = mapped_column(
         BigInteger, nullable=False, server_default=text("100000")
     )
+    backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=False, server_default=text("24"))

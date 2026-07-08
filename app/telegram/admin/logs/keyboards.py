@@ -10,10 +10,9 @@ BACK_TO_ADMIN_PANEL = states.BACK_TO_ADMIN_PANEL
 def main_menu_buttons() -> list:
     rows = []
     log_types = list(states.ALL_LOG_TYPES)
-    for i in range(0, len(log_types) - 1, 2):
+    for i in range(0, len(log_types), 2):
         pair = log_types[i : i + 2]
         rows.append([glass_inline_button(label, data=f"{states.LOG_TYPE_PREFIX}{key}") for key, label in pair])
-    rows.append([glass_inline_button(log_types[-1][1], data=f"{states.LOG_TYPE_PREFIX}{log_types[-1][0]}")])
     rows.append([glass_inline_button("⚡ ست همه لاگ‌ها با یک آیدی", data=states.LOG_SET_ALL)])
     rows.append([glass_inline_button("📊 وضعیت لاگ‌ها", data=states.LOG_SHOW_STATUS)])
     rows.append([glass_inline_button("🔙 بازگشت به پنل", data=BACK_TO_ADMIN_PANEL)])

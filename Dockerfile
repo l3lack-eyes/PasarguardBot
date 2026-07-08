@@ -13,6 +13,7 @@ RUN apt-get update \
         curl \
         libffi-dev \
         libssl-dev \
+        mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/

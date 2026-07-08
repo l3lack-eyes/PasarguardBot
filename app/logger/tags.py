@@ -31,6 +31,7 @@ class LogType(Enum):
 
     # System related logs
     OTHER = "other"
+    BACKUP = "backup"
     PANEL_UPDATE = "panel_update"
     SERVICE_EXPIRY = "service_expiry"
     LOW_VOLUME = "low_volume"

@@ -90,7 +90,7 @@ Panel_Admin_Buttons = [
     [create_button("➖ کسر موجودی"), create_button("➕ افزودن موجودی")],
     [create_button("💰 شارژ گروهی"), create_button("🔄 ریست دریافت تست")],
     [create_button("📈 افزایش حجم و زمان همگانی"), create_button("🔐 قفل چنل ها")],
-    [create_button("📝 مدیریت لاگ‌ها")],
+    [create_button("📝 مدیریت لاگ‌ها"), create_button("📦 بکاپ ربات")],
     [create_button("📝 متن‌های ربات"), create_button("⌨️ مدیریت دکمه‌های کیبورد")],
     [create_button("🔗 لینک های آماده")],
     [create_button("🈸 آپدیت برنامه ها")],

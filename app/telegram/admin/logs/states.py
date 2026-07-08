@@ -26,5 +26,6 @@ ALL_LOG_TYPES: tuple[tuple[str, str], ...] = (
     ("crypto", "💱 واریزی ارزی"),
     ("reseller", "🏢 لاگ نمایندگی‌ها"),
     ("other", "📋 سایر لاگ‌ها"),
+    ("backup", "🗄 بکاپ ربات"),
     ("app_files", "📦 کانال آپدیت برنامه‌ها"),
 )
