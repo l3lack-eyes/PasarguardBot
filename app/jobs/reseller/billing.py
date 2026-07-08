@@ -264,6 +264,7 @@ def _group_accounts_by_panel(accounts) -> dict[int, list]:
 
 async def _try_reactivate_suspended(settings, *, stats: _BillingRunStats | None = None) -> None:
     accounts = await ResellerAccountCRUD().get_accounts_by_status("suspended")
+    snapshot_crud = ResellerBillingSnapshotCRUD()
     for account in accounts:
         if account.pricing_mode not in ("hourly", "usage"):
             continue
@@ -271,15 +272,29 @@ async def _try_reactivate_suspended(settings, *, stats: _BillingRunStats | None 
         if not user:
             continue
 
-        plan = await _resolve_plan(account)
-        hourly_rate = int(resolve_live_unit_price(account, plan))
-        needed = _reactivation_balance_needed(account, hourly_rate=hourly_rate)
-        if user.amount < needed:
-            continue
-
         panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
         if not panel:
             continue
+        plan = await _resolve_plan(account)
+        hourly_rate = int(resolve_live_unit_price(account, plan))
+        needed = _reactivation_balance_needed(account, hourly_rate=hourly_rate)
+        if account.pricing_mode == "usage":
+            # Prevent suspend/reactivate flapping: for usage accounts, require enough
+            # balance to cover pending usage since the last billed snapshot.
+            admin = await get_reseller_admin(panel, account.username)
+            if not admin:
+                continue
+            snapshot = await snapshot_crud.get_latest_snapshot(account.code)
+            last_used = int(snapshot.used_traffic if snapshot else 0)
+            used_traffic = int(getattr(admin, "used_traffic", 0) or 0)
+            delta_bytes = max(0, used_traffic - last_used)
+            rate = resolve_live_unit_price(account, plan)
+            pending_charge = round((delta_bytes / gigabytes_to_bytes(1)) * rate)
+            needed = max(needed, pending_charge if pending_charge > 0 else 1)
+
+        if user.amount < needed:
+            continue
+
         await _reactivate_account(account, panel, stats=stats)
 
 
