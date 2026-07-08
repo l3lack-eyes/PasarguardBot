@@ -14,7 +14,6 @@ from telethon import Button
 from telethon.tl import functions, types
 
 from app import Kenzo
-
 from app.db.crud.discount_codes import DiscountCodeManager
 from app.db.crud.panels import PanelsManager
 from app.db.crud.reseller_accounts import ResellerAccountCRUD
@@ -33,6 +32,7 @@ from app.services.billing.reseller_pricing import (
     volume_unit_label,
 )
 from app.services.panels.admins import (
+    activate_reseller_admin,
     admin_username_exists,
     build_admin_create_payload,
     compute_reseller_data_limit,
@@ -41,13 +41,11 @@ from app.services.panels.admins import (
     generate_admin_password,
     get_reseller_admin,
     purge_reseller_admin,
-    reset_reseller_admin_password,
     suspend_reseller_admin,
-    activate_reseller_admin,
 )
 from app.services.panels.settings import get_panel_login_url
-from app.services.telegram.rich_message import USAGE_HISTORY_PER_PAGE, prepare_rich_markdown
 from app.services.reseller.logging import send_reseller_log
+from app.services.telegram.rich_message import USAGE_HISTORY_PER_PAGE, prepare_rich_markdown
 from app.telegram.keyboards.home import bhome_buttons
 from app.telegram.state import clear_user, get_data, set_data, set_step
 from app.telegram.user.reseller.states import RESELLER_FLOW_MSG_KEY
@@ -565,9 +563,8 @@ async def resume_reseller_account(account) -> tuple[bool, str]:
     if account.pricing_mode in ("hourly", "usage"):
         user = await UserCRUD().read_user(account.telegram_id)
         plan = await ResellerPlanManager().get_plan(account.plan_id) if account.plan_id else None
-        if account.pricing_mode == "usage":
-            if user and user.amount < 1:
-                return False, "برای فعال‌سازی مجدد موجودی کیف پول کافی نیست."
+        if account.pricing_mode == "usage" and user and user.amount < 1:
+            return False, "برای فعال‌سازی مجدد موجودی کیف پول کافی نیست."
         if account.pricing_mode == "hourly":
             rate = int(resolve_live_unit_price(account, plan))
             if user and user.amount < max(1, rate // 60):
@@ -599,9 +596,8 @@ async def resume_reseller_account_by_admin(account, *, actor_id: int | None = No
     if account.status == "paused" and account.pricing_mode in ("hourly", "usage"):
         user = await UserCRUD().read_user(account.telegram_id)
         plan = await ResellerPlanManager().get_plan(account.plan_id) if account.plan_id else None
-        if account.pricing_mode == "usage":
-            if user and user.amount < 1:
-                return False, "موجودی کیف پول کاربر برای فعال‌سازی کافی نیست."
+        if account.pricing_mode == "usage" and user and user.amount < 1:
+            return False, "موجودی کیف پول کاربر برای فعال‌سازی کافی نیست."
         if account.pricing_mode == "hourly":
             rate = int(resolve_live_unit_price(account, plan))
             if user and user.amount < max(1, rate // 60):

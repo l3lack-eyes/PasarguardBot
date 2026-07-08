@@ -15,7 +15,7 @@ from app.telegram.admin.reseller_plans.service import (
     reseller_plan_display_config_text,
 )
 from app.telegram.shared.utils.maintenance import bot_is_offline
-from app.telegram.state import clear_user, delete_data, get_data, set_data, set_step
+from app.telegram.state import clear_user, get_data, set_data, set_step
 from app.utils.formatting.conversions import gigabytes_to_bytes
 from config import ADMIN_ID
 

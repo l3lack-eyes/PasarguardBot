@@ -24,7 +24,7 @@ def calculate_purchase_price(plan: ResellerPlan, volume: float | None = None) ->
         vol = float(volume or 0)
         if vol <= 0:
             return 0
-        return int(round(float(plan.unit_price) * vol))
+        return round(float(plan.unit_price) * vol)
     if mode == "hourly":
         return int(plan.price)
     if mode == "usage":

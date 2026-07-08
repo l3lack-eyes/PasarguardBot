@@ -118,7 +118,7 @@ async def _reactivate_account(account, panel, *, stats: _BillingRunStats | None 
 def _reactivation_balance_needed(account, *, hourly_rate: int = 0) -> int:
     """Minimum balance to auto-reactivate after top-up (not the purchase floor)."""
     if account.pricing_mode == "hourly" and hourly_rate > 0:
-        return max(1, int(round(hourly_rate / 60)))
+        return max(1, round(hourly_rate / 60))
     return 1
 
 
@@ -135,7 +135,7 @@ async def _process_hourly_account(account, settings, now: int, *, stats: _Billin
         return
 
     elapsed_minutes = elapsed_seconds // 60
-    charge = max(1, int(round(hourly_rate * elapsed_minutes / 60)))
+    charge = max(1, round(hourly_rate * elapsed_minutes / 60))
     user = await UserCRUD().read_user(account.telegram_id)
     panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
     if not panel:
@@ -203,7 +203,7 @@ async def _process_usage_account(account, settings, now: int, *, stats: _Billing
         return
 
     delta_gb = delta_bytes / gigabytes_to_bytes(1)
-    charge = int(round(delta_gb * rate))
+    charge = round(delta_gb * rate)
     if charge <= 0:
         await snapshot_crud.add_snapshot(account.code, used_traffic, 0, now)
         return

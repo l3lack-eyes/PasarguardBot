@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 from pasarguard import AdminModify
@@ -56,7 +57,7 @@ async def run_usage_reseller_billing() -> None:
         delta_gb = delta_bytes / gigabytes_to_bytes(1)
         plan = await _resolve_plan(account)
         rate = resolve_live_unit_price(account, plan)
-        charge = int(round(delta_gb * rate))
+        charge = round(delta_gb * rate)
         if charge <= 0:
             await snapshot_crud.add_snapshot(account.code, used_traffic, 0, now)
             continue
@@ -69,13 +70,11 @@ async def run_usage_reseller_billing() -> None:
             except Exception as exc:
                 log.error("suspend usage reseller failed code=%s: %s", account.code, exc)
             await ResellerAccountCRUD().update_account(account.code, status="suspended")
-            try:
+            with contextlib.suppress(Exception):
                 await Kenzo.send_message(
                     account.telegram_id,
                     f"⛔️ نمایندگی `{account.username}` به‌دلیل کمبود موجودی برای billing مصرفی تعلیق شد.",
                 )
-            except Exception:
-                pass
             continue
 
         await update_Money(user_id=account.telegram_id, Money=-charge)

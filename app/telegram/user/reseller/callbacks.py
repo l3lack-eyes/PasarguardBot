@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from telethon import Button, events
 from telethon.tl.custom import Message
 
@@ -49,7 +51,6 @@ from app.telegram.user.reseller.helpers import (
     show_reseller_panel_picker,
     show_usage_history,
 )
-from app.telegram.user.reseller.states import RESELLER_FLOW_MSG_KEY
 from app.telegram.user.reseller.keyboards import (
     build_delete_confirm_buttons,
     build_my_resellers_list_buttons,
@@ -59,6 +60,7 @@ from app.telegram.user.reseller.keyboards import (
     build_reseller_renew_confirm_buttons,
     build_reseller_renew_plan_buttons,
 )
+from app.telegram.user.reseller.states import RESELLER_FLOW_MSG_KEY
 from app.telegram.user.start.helpers import DEFAULT_START_MESSAGE
 from app.utils.security.crypto import encrypt_data
 from app.utils.text.bot_texts import get_bot_text
@@ -126,10 +128,8 @@ async def _show_reseller_renew_confirm(event, account, plan):
     discount_code = await get_data(user_id, "reseller_renew_discount_code")
     discounted_raw = await get_data(user_id, "reseller_renew_discount_amount")
     if discount_code and discounted_raw is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             amount = int(discounted_raw)
-        except TypeError, ValueError:
-            pass
     text = build_reseller_renew_confirm_text(plan, amount=amount, discount_code=discount_code)
     await reseller_flow_edit(
         event,
@@ -621,10 +621,8 @@ async def reseller_volume_message(event: Message):
         await event.respond(err)
         return
     await set_data(user_id, "reseller_volume", str(volume))
-    try:
+    with contextlib.suppress(Exception):
         await event.delete()
-    except Exception:
-        pass
     await _prompt_reseller_username(event, plan)
 
 
@@ -643,10 +641,8 @@ async def reseller_username_message(event: Message):
         await event.respond("این نام در پنل وجود دارد. نام دیگری انتخاب کنید.")
         return
     await set_data(user_id, "reseller_username", username)
-    try:
+    with contextlib.suppress(Exception):
         await event.delete()
-    except Exception:
-        pass
     await _show_reseller_confirm(event)
 
 
@@ -657,10 +653,8 @@ async def reseller_discount_message(event: Message):
     user_id = event.sender_id
     code = (event.message.message or "").strip().upper()
     status, result = await DiscountCodeManager().validate_discount_code(code=code, user_id=user_id)
-    try:
+    with contextlib.suppress(Exception):
         await event.delete()
-    except Exception:
-        pass
     if not status:
         await event.respond(str(result))
         return
@@ -683,10 +677,8 @@ async def reseller_renew_discount_message(event: Message):
     user_id = event.sender_id
     code = (event.message.message or "").strip().upper()
     status, result = await DiscountCodeManager().validate_discount_code(code=code, user_id=user_id)
-    try:
+    with contextlib.suppress(Exception):
         await event.delete()
-    except Exception:
-        pass
     if not status:
         await event.respond(str(result))
         return

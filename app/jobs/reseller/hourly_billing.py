@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 from pasarguard import AdminModify
@@ -56,13 +57,11 @@ async def run_hourly_reseller_billing() -> None:
                 except Exception as exc:
                     log.error("suspend hourly reseller failed code=%s: %s", account.code, exc)
             await ResellerAccountCRUD().update_account(account.code, status="suspended")
-            try:
+            with contextlib.suppress(Exception):
                 await Kenzo.send_message(
                     account.telegram_id,
                     f"⛔️ نمایندگی `{account.username}` به‌دلیل کمبود موجودی ({charge:,} تومان) تعلیق شد.",
                 )
-            except Exception:
-                pass
             continue
 
         await update_Money(user_id=account.telegram_id, Money=-charge)

@@ -4,7 +4,6 @@ from telethon import Button
 
 from app.db.crud.panels import PanelsManager
 from app.db.crud.reseller_accounts import ResellerAccountCRUD
-from app.db.crud.reseller_plans import ResellerPlanManager
 from app.services.billing.reseller_pricing import (
     format_reseller_plan_admin_list_label,
     pricing_mode_label,
