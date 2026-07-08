@@ -1,6 +1,7 @@
 """Balance and wallet inline buttons."""
 
 from app.db.crud.keyboards import KeyboardButtonCRUD
+from app.telegram.admin.settings_payment.texts import is_manual_card_visible
 
 from .common import _get_keyboard_button_config, styled_callback_button
 from .registry import KEYBOARD_BUTTON_DEFAULTS
@@ -26,11 +27,11 @@ async def _balance_inline_button(
     return styled_callback_button(text, data, style)
 
 
-async def create_inline_cartbcard(settings) -> list:
+async def create_inline_cartbcard(settings, user=None) -> list:
     keyboard_crud = KeyboardButtonCRUD()
     buttons: list[list] = []
 
-    if settings.arz_mode:
+    if settings and settings.arz_mode:
         buttons.append(
             [
                 await _balance_inline_button(
@@ -44,7 +45,7 @@ async def create_inline_cartbcard(settings) -> list:
             ]
         )
 
-    if settings.pay_mode:
+    if settings and is_manual_card_visible(settings, user):
         buttons.append(
             [
                 await _balance_inline_button(

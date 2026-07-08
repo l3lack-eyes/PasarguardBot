@@ -22,6 +22,7 @@ Lock_Channels_Inline_Menu = [
 
 
 async def create_inline_manageuser(UserID):
+    user = await UserCRUD().read_user(UserID)
     buttons = [
         [Button.inline("📂 لیست سرویس‌ها", f"MToUser_listSv:{UserID}")],
         [Button.inline("🏢 نمایندگی‌های کاربر", f"MToUser_resellers:{UserID}")],
@@ -32,7 +33,6 @@ async def create_inline_manageuser(UserID):
         [Button.inline("رفع مسدودی", f"unbansup_{UserID}"), Button.inline("مسدود سازی", f"bansup_{UserID}")],
         [Button.inline("اطلاعات کاربر", f"UserInfo:{UserID}"), Button.inline("پیام به کاربر", f"sendm_{UserID}")],
     ]
-    user = await UserCRUD().read_user(UserID)
     if not user or not user.number:
         buttons.append([Button.inline("📱 تایید شماره کاربر", f"confirm_phone_{UserID}")])
 
@@ -77,29 +77,6 @@ def build_admin_reseller_chpwd_confirm_buttons(user_id: int, account_code: int) 
     return [
         [Button.inline("✅ بله، رمز عوض شود", data=f"AdminReseller_chpwd_confirm:{user_id}:{account_code}")],
         [Button.inline("❌ انصراف", data=f"AdminReseller_view:{user_id}:{account_code}")],
-    ]
-
-
-def btn_cardtocard_settings(settings=None):
-    auto_text = "✅ تایید خودکار روشن" if settings and settings.manual_auto_confirm else "❌ تایید خودکار خاموش"
-    random_mode_text = (
-        "✅ نمایش رندوم کارت روشن" if settings and settings.manual_card_random_mode else "❌ نمایش رندوم کارت خاموش"
-    )
-    return [
-        [
-            Button.inline(text="➕ افزودن کارت", data="add_manual_card"),
-            Button.inline(text="🗑 حذف کارت", data="delete_manual_card"),
-        ],
-        [Button.inline(text="📋 انتخاب کارت فعال", data="select_active_card")],
-        [Button.inline(text=random_mode_text, data="toggle_manual_card_random_mode")],
-        [Button.inline(text=auto_text, data="toggle_manual_auto_confirm")],
-        [Button.inline(text="📋 قوانین تایید خودکار", data="maar_rules_menu")],
-        [
-            Button.inline(text="💰 محدودیت کارت دستی", data="set_manual_limits"),
-        ],
-        [Button.inline(text="💰 محدودیت واریز ارزی", data="set_crypto_limits")],
-        [Button.inline(text="🎁 تنظیمات بونوس", data="bonus_settings_menu")],
-        [Button.inline(text="💼 مدیریت کیف پول‌ها", data="wallet_management")],
     ]
 
 

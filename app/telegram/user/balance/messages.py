@@ -166,7 +166,7 @@ async def return_to_balance_menu(event) -> None:
         default=texts.ADD_BALANCE_INTRO_DEFAULT,
         lang=lang,
     )
-    intro_buttons = await create_inline_cartbcard(settings=settings)
+    intro_buttons = await create_inline_cartbcard(settings=settings, user=info)
     try:
         await event.edit(intro_text, buttons=intro_buttons)
         await remember_balance_flow_message(user_id, event.message_id)
@@ -330,7 +330,7 @@ async def menu_add_balance_handler(event: Message):
         sent = await respond_after_clearing_keyboard(
             event,
             intro_text,
-            buttons=await create_inline_cartbcard(settings=settings),
+            buttons=await create_inline_cartbcard(settings=settings, user=info),
         )
         await remember_balance_flow_message(user_id, sent.id)
         await set_step(user_id=user_id, step=states.STEP_CART_B_CART)

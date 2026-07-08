@@ -87,7 +87,10 @@ async def callback_settings_toggle(event: events.CallbackQuery.Event):
             return
 
         current_value = bool(getattr(settings, setting_name, item.default))
-        await SettingsManager().update_setting(settings.id, **{setting_name: not current_value})
+        update_kwargs = {setting_name: not current_value}
+        if setting_name == "pay_mode" and not current_value:
+            update_kwargs["manual_card_visibility"] = None
+        await SettingsManager().update_setting(settings.id, **update_kwargs)
     except Exception as e:
         await event.answer(f"خطا در به‌روزرسانی تنظیمات: {e!s}", alert=True)
         return

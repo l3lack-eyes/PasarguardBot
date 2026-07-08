@@ -24,6 +24,7 @@ class User(Base):
     show_config_name = Column(Boolean, nullable=False, server_default="0")
     service_buttons_per_row = Column(Integer, nullable=False, server_default="1")
     service_button_rows = Column(Integer, nullable=False, server_default="5")
+    safe_mode = Column(Boolean, nullable=True)
 
     def __repr__(self):
         return f"<User(id={self.id}, status='{self.status}', time_s={self.time_s}, number={self.number}, amount={self.amount})>"

@@ -5,7 +5,11 @@ from telethon import events
 from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserManager
 from app.db.crud.wallets import WalletCRUD
-from app.telegram.keyboards.balance import balance_flow_cancel_rows, create_inline_crypto_payment_buttons
+from app.telegram.admin.settings_payment.texts import is_manual_card_visible
+from app.telegram.keyboards.balance import (
+    balance_flow_cancel_rows,
+    create_inline_crypto_payment_buttons,
+)
 from app.telegram.shared.guards.callback_guards import notify_session_expired
 from app.telegram.shared.utils.maintenance import bot_is_offline
 from app.telegram.shared.utils.rate_limit import debounce_callback
@@ -85,11 +89,11 @@ async def manual_card_payment_callback(event: events.CallbackQuery.Event):
     if not await _require_balance_payment_step(event):
         return
     settings = await SettingsManager().get_settings()
-    if not settings.pay_mode:
+    user = await UserManager().get_user_by_id(event.sender_id)
+    if not is_manual_card_visible(settings, user):
         await event.answer(texts.PAYMENT_DISABLED_ALERT, alert=True)
         raise events.StopPropagation
 
-    user = await UserManager().get_user_by_id(event.sender_id)
     if user.number:
         await manual_card_prompt_amount(event)
         await set_step(user_id=event.sender_id, step=states.STEP_CART_B_CART_AMOUNT)

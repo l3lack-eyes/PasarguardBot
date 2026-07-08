@@ -23,6 +23,7 @@ _SETTINGS_PAYMENT_EXACT_CALLBACKS = frozenset(
         "delete_manual_card",
         "toggle_manual_auto_confirm",
         "toggle_manual_card_random_mode",
+        "toggle_manual_card_visibility",
         "maar_rules_menu",
         "maar_add",
         "set_manual_limits",
@@ -48,6 +49,18 @@ _SETTINGS_PAYMENT_PREFIXES = (
     "maar_edit_delay:",
     "BackTOSettingsCardToCard",
 )
+
+
+async def _refresh_gateway_settings_view(event, settings=None) -> None:
+    if settings is None:
+        settings = await SettingsManager().get_settings()
+    cards = await ManualCardManager().get_all_cards()
+    active = next((c for c in cards if c.active), None)
+    random_mode_status = texts.RANDOM_MODE_ACTIVE if settings.manual_card_random_mode else texts.RANDOM_MODE_INACTIVE
+    await event.edit(
+        texts.gateway_settings_back_message(active, random_mode_status, settings),
+        buttons=keyboards.gateway_settings_buttons(settings),
+    )
 
 
 async def _maar_menu():
@@ -135,14 +148,25 @@ async def callback_settings_payment(event: events.CallbackQuery.Event):
         new_status = not settings.manual_auto_confirm
         await SettingsManager().update_setting(settings.id, manual_auto_confirm=new_status)
         settings = await SettingsManager().get_settings()
-        await event.edit(texts.SETTINGS_SAVED, buttons=keyboards.gateway_settings_buttons(settings))
+        await _refresh_gateway_settings_view(event, settings)
 
     elif data == "toggle_manual_card_random_mode":
         settings = await SettingsManager().get_settings()
         new_status = not settings.manual_card_random_mode
         await SettingsManager().update_setting(settings.id, manual_card_random_mode=new_status)
         settings = await SettingsManager().get_settings()
-        await event.edit(texts.SETTINGS_SAVED, buttons=keyboards.gateway_settings_buttons(settings))
+        await _refresh_gateway_settings_view(event, settings)
+
+    elif data == "toggle_manual_card_visibility":
+        settings = await SettingsManager().get_settings()
+        new_mode = texts.next_manual_card_visibility_mode(settings)
+        await SettingsManager().update_setting(
+            settings.id,
+            manual_card_visibility=new_mode,
+            pay_mode=True,
+        )
+        settings = await SettingsManager().get_settings()
+        await _refresh_gateway_settings_view(event, settings)
 
     elif data == "maar_rules_menu":
         menu_text, buttons = await _maar_menu()
@@ -218,15 +242,7 @@ async def callback_settings_payment(event: events.CallbackQuery.Event):
     elif data.startswith("BackTOSettingsCardToCard"):
         await set_step(user_id=event.sender_id, step="SettingsCardToCard")
         settings = await SettingsManager().get_settings()
-        cards = await ManualCardManager().get_all_cards()
-        active = next((c for c in cards if c.active), None)
-        random_mode_status = (
-            texts.RANDOM_MODE_ACTIVE if settings.manual_card_random_mode else texts.RANDOM_MODE_INACTIVE
-        )
-        await event.edit(
-            texts.gateway_settings_back_message(active, random_mode_status, settings),
-            buttons=keyboards.gateway_settings_buttons(settings),
-        )
+        await _refresh_gateway_settings_view(event, settings)
 
 
 async def callback_transaction_review(event: events.CallbackQuery.Event):

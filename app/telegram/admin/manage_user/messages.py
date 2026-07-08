@@ -15,9 +15,7 @@ from app.db.crud.user import UserCRUD
 from app.logger import get_logger
 from app.services.billing.renewal import require_panel_userid
 from app.telegram.admin.manage_user.service import build_service_text, finalize_admin_config
-from app.telegram.keyboards.admin import (
-    create_inline_manageuser,
-)
+from app.telegram.keyboards.admin import create_inline_manageuser
 from app.telegram.shared.utils.username import is_valid_username
 from app.telegram.state import delete_data, get_data, get_step, set_data, set_step
 from app.utils.formatting.conversions import gigabytes_to_bytes
@@ -352,7 +350,8 @@ async def msg_manage_user_admin(event: Message):
             founded = await UserCRUD().read_user(user_id)
             if founded:
                 await event.respond(
-                    f"▪️ لطفا از دکمه های زیر انتخاب کنید :\nوضعیت کاربر: {await get_step(user_id)}",
+                    f"▪️ لطفا از دکمه های زیر انتخاب کنید:\n"
+                    f"وضعیت کاربر: {await get_step(user_id)}",
                     buttons=await create_inline_manageuser(user_id),
                 )
 

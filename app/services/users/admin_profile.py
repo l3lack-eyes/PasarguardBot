@@ -7,14 +7,13 @@ from telethon import Button
 from app.db.crud.cryptopayments import get_user_crypto_stats
 from app.db.crud.services import ServiceCRUD
 from app.db.crud.transactions import TransactionCRUD
-from app.db.crud.user import UserCRUD, get_user_status
+from app.db.crud.user import UserCRUD, get_user_status, safe_mode_admin_label, user_safe_mode_value
 from app.telegram.state import get_step
+from app.telegram.state.store import get_all_user_state
 
 
 async def build_user_step_admin_lines(user_id: int) -> str:
     """Format DB status, Redis flow step, and temp state keys for admin panels."""
-    from app.telegram.state.store import get_all_user_state
-
     db_status = await get_user_status(user_id)
     flow_step = await get_step(user_id)
 
@@ -37,6 +36,9 @@ async def build_user_step_admin_lines(user_id: int) -> str:
 async def display_user_info_admin(event, user_id_to_check):
     """Render the admin user-info panel."""
     reduser = await UserCRUD().read_user(user_id=user_id_to_check)
+    if not reduser:
+        await event.answer("کاربر یافت نشد.", alert=True)
+        return
     manual_stats = await TransactionCRUD().get_user_transaction_stats(user_id_to_check, "manual")
     auto_stats = await TransactionCRUD().get_user_transaction_stats(user_id_to_check, "auto")
     crypto_stats = await get_user_crypto_stats(user_id_to_check)
@@ -56,7 +58,15 @@ async def display_user_info_admin(event, user_id_to_check):
 
     total_volume_gb = total_volume / (1024**3) if total_volume else 0
 
-    buttons = [[Button.inline("بازگشت", data=f"BackToUserManagement:{user_id_to_check}")]]
+    buttons = [
+        [
+            Button.inline(
+                f"🛡 سیف‌مود: {safe_mode_admin_label(user_safe_mode_value(reduser))}",
+                data=f"ToggleSafeMode:{user_id_to_check}",
+            )
+        ],
+        [Button.inline("بازگشت", data=f"BackToUserManagement:{user_id_to_check}")],
+    ]
 
     if reduser.tested:
         reset_test_button = Button.inline(
@@ -99,6 +109,7 @@ async def display_user_info_admin(event, user_id_to_check):
         f"📊 **مجموع حجم سرویس‌ها:** `{total_volume_gb:.2f} گیگابایت`\n"
         f"👤 **ارجاع دهنده:** {f'`{ref_user.id}`' if ref_user else 'ندارد'}\n"
         f"🌐 **زبان:** `{'فارسی' if reduser.language == 'fa' else 'انگلیسی'}`\n"
+        f"🛡 **سیف‌مود:** `{safe_mode_admin_label(user_safe_mode_value(reduser))}`\n"
         f"🧪 **کانفیگ تست:** `{'قبلا گرفته' if reduser.tested else 'هنوز تست رو نگرفته'}`",
         buttons=buttons,
     )

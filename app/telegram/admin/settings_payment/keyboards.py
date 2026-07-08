@@ -3,7 +3,31 @@
 from telethon import Button
 
 from app.telegram.admin.settings_payment import texts
-from app.telegram.keyboards.admin import btn_cardtocard_settings
+
+
+def btn_cardtocard_settings(settings=None):
+    auto_text = "✅ تایید خودکار روشن" if settings and settings.manual_auto_confirm else "❌ تایید خودکار خاموش"
+    random_mode_text = (
+        "✅ نمایش رندوم کارت روشن" if settings and settings.manual_card_random_mode else "❌ نمایش رندوم کارت خاموش"
+    )
+    visibility_text = texts.manual_card_visibility_button_label(settings)
+    return [
+        [
+            Button.inline(text="➕ افزودن کارت", data="add_manual_card"),
+            Button.inline(text="🗑 حذف کارت", data="delete_manual_card"),
+        ],
+        [Button.inline(text="📋 انتخاب کارت فعال", data="select_active_card")],
+        [Button.inline(text=visibility_text, data="toggle_manual_card_visibility")],
+        [Button.inline(text=random_mode_text, data="toggle_manual_card_random_mode")],
+        [Button.inline(text=auto_text, data="toggle_manual_auto_confirm")],
+        [Button.inline(text="📋 قوانین تایید خودکار", data="maar_rules_menu")],
+        [
+            Button.inline(text="💰 محدودیت کارت دستی", data="set_manual_limits"),
+        ],
+        [Button.inline(text="💰 محدودیت واریز ارزی", data="set_crypto_limits")],
+        [Button.inline(text="🎁 تنظیمات بونوس", data="bonus_settings_menu")],
+        [Button.inline(text="💼 مدیریت کیف پول‌ها", data="wallet_management")],
+    ]
 
 
 def back_to_settings_card_button():

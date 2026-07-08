@@ -517,6 +517,18 @@ async def get_Money(user_id):
         return 0
 
 
+def user_safe_mode_value(user) -> bool | None:
+    if not user:
+        return None
+    return getattr(user, "safe_mode", None)
+
+
+def safe_mode_admin_label(value: bool | None) -> str:
+    if value is True:
+        return "✅ فعال"
+    return "❌ غیرفعال"
+
+
 async def all_users():
     async with Session() as session:
         result = await session.execute(select(func.count()).select_from(User))

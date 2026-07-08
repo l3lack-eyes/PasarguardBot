@@ -13,7 +13,7 @@ from app.db.crud.reseller_accounts import ResellerAccountCRUD
 from app.db.crud.reseller_plans import ResellerPlanManager
 from app.db.crud.services import ServiceCRUD
 from app.db.crud.settings import SettingsManager
-from app.db.crud.user import UserCRUD
+from app.db.crud.user import UserCRUD, safe_mode_admin_label, user_safe_mode_value
 from app.logger import LogType, get_logger
 from app.services.billing.renewal import require_panel_userid
 from app.services.billing.reseller_renewal import renew_reseller_account
@@ -662,6 +662,24 @@ async def callback_manage_user_admin(event: events.CallbackQuery.Event):
     data = event.data.decode("UTF-8")
     if await handle_admin_reseller_callbacks(event, data):
         return
+
+    if data.startswith("ToggleSafeMode:"):
+        user_id_to_check = int(data.split(":")[1])
+        target_user = await UserCRUD().read_user(user_id_to_check)
+        if not target_user:
+            await event.answer("کاربر یافت نشد.", alert=True)
+            return
+        current = user_safe_mode_value(target_user)
+        new_value = current is not True
+        await UserCRUD().update_user(user_id_to_check, safe_mode=new_value)
+        status_text = safe_mode_admin_label(new_value)
+        await event.answer(
+            f"🛡 سیف‌مود برای کاربر `{user_id_to_check}` → {status_text}",
+            alert=False,
+        )
+        await display_user_info_admin(event, user_id_to_check)
+        return
+
     if is_manage_user_service_callback(data):
         await handle_manage_user_service_callbacks(event, data)
         raise events.StopPropagation
@@ -855,14 +873,14 @@ async def callback_manage_user_admin(event: events.CallbackQuery.Event):
             log_text = log_text[:3990] + "\n\n_(لاگ کوتاه شد)_"
         await send_log_message(LogType.OTHER, message=log_text)
 
+    elif data.startswith("UserInfo:"):
+        user_id_to_check = int(data.split(":")[1])
+        await display_user_info_admin(event, user_id_to_check)
+
     elif data.startswith("ResetTest:"):
         user_id_to_check = int(data.split(":")[1])
         await UserCRUD().update_user(user_id_to_check, tested=0)
         await event.answer(f"✅ سرویس تست برای کاربر با آیدی `{user_id_to_check}` ریست شد", alert=False)
-        await display_user_info_admin(event, user_id_to_check)
-
-    elif data.startswith("UserInfo:"):
-        user_id_to_check = int(data.split(":")[1])
         await display_user_info_admin(event, user_id_to_check)
 
 

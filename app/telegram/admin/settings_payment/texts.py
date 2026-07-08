@@ -8,6 +8,12 @@ CARD_NOT_REGISTERED = "ثبت نشده"
 RANDOM_MODE_ACTIVE = "✅ فعال (کارت‌ها به صورت رندوم نمایش داده می‌شوند)"
 RANDOM_MODE_INACTIVE = "❌ غیرفعال (کارت فعال نمایش داده می‌شود)"
 
+MANUAL_CARD_VISIBILITY_ALL = "all"
+MANUAL_CARD_VISIBILITY_SAFE_MODE = "safe_mode"
+
+MANUAL_CARD_VISIBILITY_ALL_LABEL = "👥 تغییر به: نمایش برای همه"
+MANUAL_CARD_VISIBILITY_SAFE_MODE_LABEL = "🛡 تغییر به: فقط سیف‌مود"
+
 CARD_NAME_PROMPT = "نام دارنده کارت را ارسال کنید:"
 CARD_ADDED_SUCCESS = "کارت جدید با موفقیت اضافه شد."
 MANUAL_MIN_PROMPT = "حداقل مبلغ کارت دستی را وارد کنید:"
@@ -62,22 +68,80 @@ TX_REJECT_USER_MESSAGE = (
 )
 
 
+def manual_card_visibility_mode(settings) -> str:
+    mode = getattr(settings, "manual_card_visibility", None) if settings else None
+    if mode == MANUAL_CARD_VISIBILITY_SAFE_MODE:
+        return MANUAL_CARD_VISIBILITY_SAFE_MODE
+    return MANUAL_CARD_VISIBILITY_ALL
+
+
+def next_manual_card_visibility_mode(settings) -> str:
+    current = manual_card_visibility_mode(settings)
+    if current == MANUAL_CARD_VISIBILITY_SAFE_MODE:
+        return MANUAL_CARD_VISIBILITY_ALL
+    return MANUAL_CARD_VISIBILITY_SAFE_MODE
+
+
+def manual_card_visibility_button_label(settings) -> str:
+    if manual_card_visibility_mode(settings) == MANUAL_CARD_VISIBILITY_SAFE_MODE:
+        return MANUAL_CARD_VISIBILITY_ALL_LABEL
+    return MANUAL_CARD_VISIBILITY_SAFE_MODE_LABEL
+
+
+def manual_card_visibility_status(settings) -> str:
+    if manual_card_visibility_mode(settings) == MANUAL_CARD_VISIBILITY_SAFE_MODE:
+        return "فقط کاربران دارای سیف‌مود"
+    return "همه کاربران"
+
+
+def pay_mode_status(settings) -> str:
+    if settings and settings.pay_mode:
+        return "✅ فعال"
+    return "❌ غیرفعال"
+
+
+def is_manual_card_visible(settings, user) -> bool:
+    if not settings or not settings.pay_mode:
+        return False
+    if manual_card_visibility_mode(settings) == MANUAL_CARD_VISIBILITY_SAFE_MODE:
+        return user is not None and getattr(user, "safe_mode", None) is True
+    return True
+
+
 def gateway_settings_message(manual_info: str, random_mode_status: str, settings) -> str:
+    pay_mode_hint = ""
+    if settings and not settings.pay_mode:
+        pay_mode_hint = (
+            "\n⚠️ **دکمه کارت دستی** در تنظیمات ربات خاموش است؛ "
+            "برای نمایش در افزایش موجودی، از بخش «پرداخت‌ها» آن را فعال کنید.\n"
+        )
     return (
         "💳 **کارت فعال برای کارت به کارت دستی**:\n"
         f"{manual_info}\n"
-        f"🎲 **حالت نمایش کارت**: {random_mode_status}\n\n"
-        "روی گزینه های زیر کلیک کنید برای تغییرات"
+        f"🔘 **دکمه کارت دستی در ربات**: {pay_mode_status(settings)}\n"
+        f"🎲 **حالت نمایش شماره کارت**: {random_mode_status}\n"
+        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}"
+        f"{pay_mode_hint}\n\n"
+        "برای تغییر هر گزینه، روی دکمه مربوطه بزنید."
     )
 
 
 def gateway_settings_back_message(active, random_mode_status: str, settings) -> str:
+    pay_mode_hint = ""
+    if settings and not settings.pay_mode:
+        pay_mode_hint = (
+            "\n⚠️ **دکمه کارت دستی** در تنظیمات ربات خاموش است؛ "
+            "برای نمایش در افزایش موجودی، از بخش «پرداخت‌ها» آن را فعال کنید.\n"
+        )
     return (
         "💳 **شماره کارت ست شده برای کارت به کارت دستی**:\n"
         f"👤 **نام دارنده کارت**: `{active.name if (active and active.name) else CARD_HOLDER_NOT_SET}`\n"
         f"📄 **شماره کارت**:\n `{active.number if (active and active.number) else CARD_HOLDER_NOT_SET}`\n"
-        f"🎲 **حالت نمایش کارت**: {random_mode_status}\n\n"
-        "روی گزینه های زیر کلیک کنید برای تغییرات"
+        f"🔘 **دکمه کارت دستی در ربات**: {pay_mode_status(settings)}\n"
+        f"🎲 **حالت نمایش شماره کارت**: {random_mode_status}\n"
+        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}"
+        f"{pay_mode_hint}\n\n"
+        "برای تغییر هر گزینه، روی دکمه مربوطه بزنید."
     )
 
 

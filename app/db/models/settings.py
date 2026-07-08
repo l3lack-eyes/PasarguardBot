@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Integer, text
+from sqlalchemy import BigInteger, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -20,6 +20,7 @@ class Settings(Base):
     test_panel_id: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
     test_phone_verify: Mapped[bool] = mapped_column(default=True, server_default=text("1"))
     pay_mode: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    manual_card_visibility: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ip_mode: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     arz_mode: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     upg_mode: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
