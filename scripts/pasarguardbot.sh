@@ -296,19 +296,62 @@ generate_env_file() {
 }
 
 # ── Clone & compose ───────────────────────────────────────────────────────────
-clone_source() {
-    if [[ -d "$SOURCE_DIR/.git" ]]; then
-        info "Source already cloned — pulling latest changes..."
-        git -C "$SOURCE_DIR" fetch --all --prune
-        git -C "$SOURCE_DIR" reset --hard origin/main 2>/dev/null \
-            || git -C "$SOURCE_DIR" reset --hard origin/master 2>/dev/null \
-            || git -C "$SOURCE_DIR" pull --ff-only
-    else
-        info "Cloning from GitHub → ${SOURCE_DIR}"
-        mkdir -p "$(dirname "$SOURCE_DIR")"
-        git clone --depth 1 "$REPO_URL" "$SOURCE_DIR"
+resolve_latest_tag() {
+    local tag
+    tag="$(
+        git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+            | sed 's/.*refs\/tags\///' \
+            | grep -v '\^{}$' \
+            | sort -V \
+            | tail -1
+    )"
+    [[ -n "$tag" ]] || die "No release tags found on ${REPO_URL}. Create a tag on GitHub first (e.g. 1.0.0)."
+    printf '%s' "$tag"
+}
+
+get_current_tag() {
+    git -C "$SOURCE_DIR" describe --tags --exact-match HEAD 2>/dev/null \
+        || git -C "$SOURCE_DIR" tag --points-at HEAD 2>/dev/null | head -1 \
+        || true
+}
+
+checkout_release_tag() {
+    local latest="$1"
+    local current
+
+    current="$(get_current_tag)"
+    if [[ "$current" == "$latest" ]]; then
+        ok "Already on release v${latest}"
+        return 0
     fi
-    ok "Source ready: ${SOURCE_DIR}"
+
+    info "Checking out release v${latest}..."
+    git -C "$SOURCE_DIR" fetch --tags --prune origin
+    if git -C "$SOURCE_DIR" checkout --force "$latest" 2>/dev/null; then
+        ok "Source at v${latest}"
+        return 0
+    fi
+
+    warn "Could not switch to v${latest} — re-cloning..."
+    rm -rf "$SOURCE_DIR"
+    git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
+    ok "Source cloned at v${latest}"
+}
+
+clone_source() {
+    local latest
+    latest="$(resolve_latest_tag)"
+
+    if [[ -d "$SOURCE_DIR/.git" ]]; then
+        info "Source already cloned — syncing to latest release tag..."
+        checkout_release_tag "$latest"
+    else
+        info "Cloning release v${latest} from GitHub → ${SOURCE_DIR}"
+        mkdir -p "$(dirname "$SOURCE_DIR")"
+        git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
+        ok "Source cloned at v${latest}"
+    fi
+    ok "Source ready: ${SOURCE_DIR} (v${latest})"
 }
 
 setup_compose() {
@@ -434,14 +477,14 @@ action_update() {
     draw_banner
     is_installed || die "Install the bot first (option 1)."
 
-    info "Fetching latest version from GitHub..."
-    git -C "$SOURCE_DIR" fetch --all --prune
-    local old_rev new_rev
-    old_rev="$(git -C "$SOURCE_DIR" rev-parse --short HEAD)"
-    git -C "$SOURCE_DIR" pull --ff-only origin main 2>/dev/null \
-        || git -C "$SOURCE_DIR" pull --ff-only origin master 2>/dev/null \
-        || git -C "$SOURCE_DIR" pull --ff-only
-    new_rev="$(git -C "$SOURCE_DIR" rev-parse --short HEAD)"
+    info "Checking for a newer release tag on GitHub..."
+    local old_tag new_tag latest
+    old_tag="$(get_current_tag)"
+    old_tag="${old_tag:-unknown}"
+    latest="$(resolve_latest_tag)"
+    checkout_release_tag "$latest"
+    new_tag="$(get_current_tag)"
+    new_tag="${new_tag:-$latest}"
 
     setup_compose
 
@@ -451,7 +494,7 @@ action_update() {
     info "Restarting services..."
     docker_compose up -d --force-recreate
 
-    ok "Update complete (${old_rev} → ${new_rev})."
+    ok "Update complete (v${old_tag} → v${new_tag})."
     pause
 }
 

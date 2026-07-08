@@ -656,21 +656,21 @@ wheels = [
 
 [[package]]
 name = "pasarguard"
-version = "2.2.4"
+version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datetime" },
     { name = "httpx", extra = ["socks"] },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/58/911a6d42da41dfe2b52794b0d9a86236a3b0d9fab45a0e89c99e69f15faa/pasarguard-2.2.4.tar.gz", hash = "sha256:d9a4ff5067f581ac1111775c10adaaf5089e7f9ee4330da2792d45e26e0e1410", size = 116974, upload-time = "2026-06-25T02:44:48.59Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/b8/8bf15058706cc9f1d81be4566b03f7280de8c927b6aedb047791fef58555/pasarguard-2.3.0.tar.gz", hash = "sha256:ec30cc4f7641187f13536fd774a47d6aedc6dfbeb8756a8168b290348757c1d4", size = 119980, upload-time = "2026-06-29T16:42:56.646Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/b7/2065e3ab848297320bd55b14cdaee61278a2f5fff870da13c356ab55a661/pasarguard-2.2.4-py3-none-any.whl", hash = "sha256:8d5fac39062022a65a355fe9a8688b071085deb144cba04e5f149c436f02d537", size = 47224, upload-time = "2026-06-25T02:44:47.411Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/1f/e1fbc07e96d6f48f39c0f9f65d9266e993c71dcb5e1032198db4cf573c91/pasarguard-2.3.0-py3-none-any.whl", hash = "sha256:2b360c61743155f81a1708e51631837a1f8cc742a73540b164b8f4fca6aef24b", size = 49909, upload-time = "2026-06-29T16:42:55.697Z" },
 ]
 
 [[package]]
 name = "pasarguardbot"
-version = "4.0.0"
+version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiofasttelethonhelper" },
@@ -724,7 +724,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "imagehash", specifier = ">=4.3.2" },
     { name = "jdatetime", specifier = ">=5.3.0" },
-    { name = "pasarguard", specifier = ">=2.2.3" },
+    { name = "pasarguard", specifier = ">=2.3.0" },
     { name = "persiantools", specifier = ">=5.5.1" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "psutil", specifier = ">=7.0.0" },
