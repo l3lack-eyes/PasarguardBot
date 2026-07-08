@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ── Paths & repo ──────────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.0.3"
+readonly SCRIPT_VERSION="1.0.4"
 readonly REPO_URL="https://github.com/AmirKenzo/PasarguardBot.git"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly SOURCE_DIR="/var/lib/pasarguardbot"
@@ -14,6 +14,7 @@ readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
+readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/docker-compose.yml"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
 readonly PHPMYADMIN_PORT=6163
 
@@ -45,6 +46,19 @@ pause() {
 
 rand_hex()  { openssl rand -hex "${1:-16}"; }
 rand_b64()  { openssl rand -base64 "${1:-24}" | tr -d '/+=' | head -c "${1:-24}"; }
+
+# Always show versions as a single "vX.Y.Z" (supports both 1.0.0 and v1.0.0 tags).
+format_version() {
+    local v="${1:-}"
+    [[ -n "$v" ]] || {
+        printf '%s' '—'
+        return 0
+    }
+    while [[ "$v" == [vV]* ]]; do
+        v="${v:1}"
+    done
+    printf 'v%s' "$v"
+}
 
 require_root() {
     [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "This script must be run as root: sudo $0"
@@ -125,7 +139,7 @@ get_installed_bot_version() {
     if [[ -d "$SOURCE_DIR/.git" ]]; then
         tag="$(get_current_tag 2>/dev/null || true)"
         if [[ -n "$tag" ]]; then
-            printf 'v%s' "$tag"
+            format_version "$tag"
             return 0
         fi
     fi
@@ -136,7 +150,7 @@ get_installed_bot_version() {
                 | sed -E 's/^version = "(.*)"/\1/'
         )"
         if [[ -n "$version" ]]; then
-            printf 'v%s' "$version"
+            format_version "$version"
             return 0
         fi
     fi
@@ -168,27 +182,28 @@ get_bot_runtime_summary() {
 }
 
 show_install_info() {
-    local installed_ver latest_tag remote_script_ver bot_runtime fastapi_port
+    local installed_ver latest_tag latest_ver remote_script_ver bot_runtime fastapi_port
 
-    echo -e "  ${C_DIM}Manager script:${C_RESET}  v${SCRIPT_VERSION}"
+    echo -e "  ${C_DIM}Manager script:${C_RESET}  $(format_version "$SCRIPT_VERSION")"
 
     remote_script_ver="$(get_remote_script_version)"
     if [[ -n "$remote_script_ver" && "$remote_script_ver" != "$SCRIPT_VERSION" ]]; then
-        echo -e "  ${C_DIM}Script latest:${C_RESET}   v${remote_script_ver} ${C_YELLOW}(update available)${C_RESET}"
+        echo -e "  ${C_DIM}Script latest:${C_RESET}   $(format_version "$remote_script_ver") ${C_YELLOW}(update available)${C_RESET}"
     fi
 
     if is_installed; then
         installed_ver="$(get_installed_bot_version)"
         latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
+        latest_ver="$(format_version "$latest_tag")"
         bot_runtime="$(get_bot_runtime_summary)"
         fastapi_port="$(get_env_value "FASTAPI_PORT")"
         fastapi_port="${fastapi_port:-6160}"
 
         echo -e "  ${C_DIM}Bot release:${C_RESET}    ${installed_ver}"
-        if [[ -n "$latest_tag" && "v${latest_tag}" != "$installed_ver" ]]; then
-            echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag} ${C_YELLOW}(update available)${C_RESET}"
+        if [[ -n "$latest_tag" && "$latest_ver" != "$installed_ver" ]]; then
+            echo -e "  ${C_DIM}Latest release:${C_RESET}  ${latest_ver} ${C_YELLOW}(update available)${C_RESET}"
         elif [[ -n "$latest_tag" ]]; then
-            echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag}"
+            echo -e "  ${C_DIM}Latest release:${C_RESET}  ${latest_ver}"
         fi
         echo -e "  ${C_DIM}Bot container:${C_RESET}  ${bot_runtime}"
         echo -e "  ${C_DIM}API port:${C_RESET}        ${fastapi_port}"
@@ -196,14 +211,14 @@ show_install_info() {
         echo -e "  ${C_DIM}Source:${C_RESET}          ${SOURCE_DIR}"
     else
         latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
-        [[ -n "$latest_tag" ]] && echo -e "  ${C_DIM}Latest release:${C_RESET}  v${latest_tag}"
+        [[ -n "$latest_tag" ]] && echo -e "  ${C_DIM}Latest release:${C_RESET}  $(format_version "$latest_tag")"
     fi
     echo
 }
 
 draw_banner() {
     clear
-    echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— Docker manager v${SCRIPT_VERSION}${C_RESET}"
+    echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— Docker manager $(format_version "$SCRIPT_VERSION")${C_RESET}"
     echo
     show_install_info
 }
@@ -404,50 +419,66 @@ get_current_tag() {
 checkout_release_tag() {
     local latest="$1"
     local current
+    local latest_label
 
+    latest_label="$(format_version "$latest")"
     current="$(get_current_tag)"
     if [[ "$current" == "$latest" ]]; then
-        ok "Already on release v${latest}"
+        ok "Already on release ${latest_label}"
         return 0
     fi
 
-    info "Checking out release v${latest}..."
+    info "Checking out release ${latest_label}..."
     git -C "$SOURCE_DIR" fetch --tags --prune origin
     if git -C "$SOURCE_DIR" checkout --force "$latest" 2>/dev/null; then
-        ok "Source at v${latest}"
+        ok "Source at ${latest_label}"
         return 0
     fi
 
-    warn "Could not switch to v${latest} — re-cloning..."
+    warn "Could not switch to ${latest_label} — re-cloning..."
     rm -rf "$SOURCE_DIR"
     git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
-    ok "Source cloned at v${latest}"
+    ok "Source cloned at ${latest_label}"
 }
 
 clone_source() {
-    local latest
+    local latest latest_label
     latest="$(resolve_latest_tag)"
+    latest_label="$(format_version "$latest")"
 
     if [[ -d "$SOURCE_DIR/.git" ]]; then
         info "Source already cloned — syncing to latest release tag..."
         checkout_release_tag "$latest"
     else
-        info "Cloning release v${latest} from GitHub → ${SOURCE_DIR}"
+        info "Cloning release ${latest_label} from GitHub → ${SOURCE_DIR}"
         mkdir -p "$(dirname "$SOURCE_DIR")"
         git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
-        ok "Source cloned at v${latest}"
+        ok "Source cloned at ${latest_label}"
     fi
-    ok "Source ready: ${SOURCE_DIR} (v${latest})"
+    ok "Source ready: ${SOURCE_DIR} (${latest_label})"
 }
 
 setup_compose() {
-    local src_compose="${SOURCE_DIR}/docker-compose.yml"
-    [[ -f "$src_compose" ]] || die "docker-compose.yml not found in ${SOURCE_DIR}"
+    local tmp
 
     mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis}
-    cp "$src_compose" "$COMPOSE_FILE"
 
-    ok "docker-compose.yml copied from source to ${COMPOSE_FILE}"
+    # Always fetch the latest compose from GitHub main so install/update
+    # does not keep an old local image name like pasarguardbot:latest.
+    tmp="$(mktemp)"
+    info "Downloading latest docker-compose.yml from GitHub..."
+    curl -fsSL --max-time 30 "$COMPOSE_RAW_URL" -o "$tmp" || {
+        rm -f "$tmp"
+        die "Failed to download docker-compose.yml from GitHub."
+    }
+    grep -q 'ghcr.io/amirkenzo/pasarguardbot:latest' "$tmp" || {
+        rm -f "$tmp"
+        die "Downloaded docker-compose.yml is invalid (missing GHCR bot image)."
+    }
+
+    cp "$tmp" "$COMPOSE_FILE"
+    rm -f "$tmp"
+    ok "docker-compose.yml updated at ${COMPOSE_FILE}"
 }
 
 pull_bot_image() {
@@ -601,7 +632,7 @@ action_update() {
     info "Restarting services with the new image..."
     docker_compose up -d --force-recreate --pull always
 
-    ok "Update complete (${old_tag} → ${new_tag})."
+    ok "Update complete ($(format_version "$old_tag") → $(format_version "$new_tag"))."
     pause
 }
 
@@ -625,7 +656,7 @@ action_update_script() {
     fi
 
     if [[ "$new_ver" == "$old_ver" ]]; then
-        ok "Manager script is already up to date (v${old_ver})."
+        ok "Manager script is already up to date ($(format_version "$old_ver"))."
         pause
         return 0
     fi
@@ -635,7 +666,7 @@ action_update_script() {
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
 
-    ok "Manager script updated: v${old_ver} → v${new_ver}"
+    ok "Manager script updated: $(format_version "$old_ver") → $(format_version "$new_ver")"
     warn "Run pasarguardbot again to use the new script."
     pause
 }
