@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ── Paths & repo ──────────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.0.1"
+readonly SCRIPT_VERSION="1.0.2"
 readonly REPO_URL="https://github.com/AmirKenzo/PasarguardBot.git"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly SOURCE_DIR="/var/lib/pasarguardbot"
@@ -62,9 +62,9 @@ set_env_var() {
 
 docker_compose() {
     if docker compose version &>/dev/null; then
-        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+        docker compose --project-directory "$SOURCE_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
     elif command -v docker-compose &>/dev/null; then
-        docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+        docker-compose --project-directory "$SOURCE_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
     else
         die "Docker Compose not found."
     fi
@@ -456,29 +456,25 @@ cleanup_stale_resources() {
 }
 
 install_manager_command() {
-    local self source_copy self_real manager_real
-    self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
-    source_copy="${SOURCE_DIR}/scripts/pasarguardbot.sh"
+    local tmp
+    tmp="$(mktemp)"
 
-    if [[ -z "$self" || ! -f "$self" ]]; then
-        if [[ -f "$source_copy" ]]; then
-            self="$source_copy"
-        else
-            die "Manager script source not found (checked: ${BASH_SOURCE[0]} and ${source_copy})."
-        fi
-    fi
+    info "Installing latest manager script from GitHub main..."
+    curl -fsSL --max-time 30 "$SCRIPT_RAW_URL" -o "$tmp" || {
+        rm -f "$tmp"
+        die "Failed to download manager script from GitHub."
+    }
+    head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || {
+        rm -f "$tmp"
+        die "Downloaded manager script is invalid."
+    }
 
     mkdir -p "$CONFIG_DIR"
-    self_real="$(readlink -f "$self" 2>/dev/null || printf '%s' "$self")"
-    manager_real="$(readlink -f "$MANAGER_SCRIPT" 2>/dev/null || printf '%s' "$MANAGER_SCRIPT")"
-
-    if [[ "$self_real" != "$manager_real" ]]; then
-        cp "$self" "$MANAGER_SCRIPT"
-    fi
-
+    cp "$tmp" "$MANAGER_SCRIPT"
+    rm -f "$tmp"
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
-    ok "pasarguardbot command registered in PATH."
+    ok "pasarguardbot command installed from GitHub and registered in PATH."
 }
 
 # ── Actions ───────────────────────────────────────────────────────────────────
