@@ -456,8 +456,18 @@ cleanup_stale_resources() {
 }
 
 install_manager_command() {
-    local self
-    self="$(readlink -f "${BASH_SOURCE[0]}")"
+    local self source_copy
+    self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+    source_copy="${SOURCE_DIR}/scripts/pasarguardbot.sh"
+
+    if [[ -z "$self" || ! -f "$self" ]]; then
+        if [[ -f "$source_copy" ]]; then
+            self="$source_copy"
+        else
+            die "Manager script source not found (checked: ${BASH_SOURCE[0]} and ${source_copy})."
+        fi
+    fi
+
     mkdir -p "$CONFIG_DIR"
     cp "$self" "$MANAGER_SCRIPT"
     chmod +x "$MANAGER_SCRIPT"
