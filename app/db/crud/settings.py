@@ -59,7 +59,6 @@ class SettingsManager:
                         crypto_bonus_enabled=False,
                         crypto_bonus_percent=0,
                         reseller_sale_mode=False,
-                        reseller_usage_billing_enabled=False,
                         reseller_min_wallet_balance=100000,
                     )
                     session.add(default_settings)

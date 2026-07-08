@@ -31,7 +31,7 @@ async def _resolve_plan(account):
 
 async def run_usage_reseller_billing() -> None:
     settings = await SettingsManager().get_settings()
-    if not settings or not settings.reseller_usage_billing_enabled:
+    if not settings:
         return
 
     accounts = await ResellerAccountCRUD().get_billable_accounts(("usage",))

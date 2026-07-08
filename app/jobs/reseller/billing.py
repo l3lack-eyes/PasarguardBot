@@ -173,9 +173,6 @@ async def _process_hourly_account(account, settings, now: int, *, stats: _Billin
 
 
 async def _process_usage_account(account, settings, now: int, *, stats: _BillingRunStats | None = None) -> None:
-    if not settings.reseller_usage_billing_enabled:
-        return
-
     panel = await PanelsManager().get_panel_by_code(code=account.panel_code)
     if not panel:
         return

@@ -79,12 +79,11 @@ SETTINGS_MENU_SECTIONS = (
     SettingsMenuSection(
         "reseller_sales",
         "🏢 فروش نمایندگی پنل",
-        "فعال‌سازی فروش نمایندگی، billing مصرفی و حداقل موجودی کیف پول برای نمایندگان.",
+        "فعال‌سازی فروش نمایندگی و مدیریت حداقل موجودی کیف پول برای نمایندگان.",
         (
             SettingsMenuItem("فروش نمایندگی", "reseller_sale_mode"),
-            SettingsMenuItem("billing مصرفی", "reseller_usage_billing_enabled"),
         ),
-        columns=2,
+        columns=1,
     ),
     SettingsMenuSection(
         "service_tools",
