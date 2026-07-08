@@ -32,9 +32,7 @@
 ## نصب سریع (لینوکس)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh -o /tmp/pasarguardbot.sh
-chmod +x /tmp/pasarguardbot.sh
-sudo /tmp/pasarguardbot.sh
+sudo mkdir -p /opt/pasarguardbot && curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh | sudo tee /opt/pasarguardbot/pasarguardbot.sh > /dev/null && sudo chmod +x /opt/pasarguardbot/pasarguardbot.sh && sudo ln -sf /opt/pasarguardbot/pasarguardbot.sh /usr/local/bin/pasarguardbot && sudo pasarguardbot
 ```
 
 بعد از نصب: `pasarguardbot`
@@ -100,11 +98,13 @@ uv run main.py
 |---|--------|
 | 1 | نصب |
 | 2 | حذف |
-| 3 | بروزرسانی |
+| 3 | بروزرسانی ربات (تگ release) |
 | 4 | لاگ‌ها |
 | 5 | ویرایش `.env` |
 | 6 | ریستارت |
 | 7 | وضعیت سرویس‌ها |
+| 8 | نمایش webhook و URLها |
+| 9 | آپدیت اسکریپت مدیریت |
 
 ---
 
