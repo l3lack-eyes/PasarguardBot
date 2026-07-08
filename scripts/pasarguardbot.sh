@@ -456,7 +456,7 @@ cleanup_stale_resources() {
 }
 
 install_manager_command() {
-    local self source_copy
+    local self source_copy self_real manager_real
     self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
     source_copy="${SOURCE_DIR}/scripts/pasarguardbot.sh"
 
@@ -469,7 +469,13 @@ install_manager_command() {
     fi
 
     mkdir -p "$CONFIG_DIR"
-    cp "$self" "$MANAGER_SCRIPT"
+    self_real="$(readlink -f "$self" 2>/dev/null || printf '%s' "$self")"
+    manager_real="$(readlink -f "$MANAGER_SCRIPT" 2>/dev/null || printf '%s' "$MANAGER_SCRIPT")"
+
+    if [[ "$self_real" != "$manager_real" ]]; then
+        cp "$self" "$MANAGER_SCRIPT"
+    fi
+
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
     ok "pasarguardbot command registered in PATH."
