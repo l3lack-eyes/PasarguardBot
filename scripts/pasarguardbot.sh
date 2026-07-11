@@ -15,6 +15,9 @@ readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
+readonly NETPLAN_FIX_SCRIPT_NAME="fix-docker-netplan.sh"
+readonly NETPLAN_FIX_INSTALLED="${CONFIG_DIR}/${NETPLAN_FIX_SCRIPT_NAME}"
+readonly NETPLAN_FIX_RAW_URL="${SCRIPT_RAW_URL/pasarguardbot.sh/${NETPLAN_FIX_SCRIPT_NAME}}"
 readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/docker-compose.yml"
 readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/.env.example"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
@@ -734,6 +737,7 @@ draw_menu() {
     echo -e "${C_BOLD}  │${C_RESET}  7) Service status                        ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  8) Show webhook & URLs                   ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  9) Update manager script                 ${C_BOLD}│${C_RESET}"
+    echo -e "${C_BOLD}  │${C_RESET} 10) Fix Docker network                     ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  0) Exit                                   ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  └─────────────────────────────────────────┘${C_RESET}"
     echo
@@ -948,6 +952,316 @@ install_manager_from_file() {
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
     hash -r 2>/dev/null || true
+    sync_netplan_fix_script || true
+}
+
+sync_netplan_fix_script() {
+    local src_dir tmp
+
+    src_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || src_dir=""
+    if [[ -n "$src_dir" && -r "${src_dir}/${NETPLAN_FIX_SCRIPT_NAME}" ]]; then
+        mkdir -p "$CONFIG_DIR"
+        cp "${src_dir}/${NETPLAN_FIX_SCRIPT_NAME}" "$NETPLAN_FIX_INSTALLED"
+        chmod +x "$NETPLAN_FIX_INSTALLED"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    if curl_download "$NETPLAN_FIX_RAW_URL" "$tmp"; then
+        head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || {
+            rm -f "$tmp"
+            warn "Downloaded ${NETPLAN_FIX_SCRIPT_NAME} is invalid."
+            return 1
+        }
+        mkdir -p "$CONFIG_DIR"
+        cp "$tmp" "$NETPLAN_FIX_INSTALLED"
+        chmod +x "$NETPLAN_FIX_INSTALLED"
+        rm -f "$tmp"
+        return 0
+    fi
+
+    rm -f "$tmp"
+    warn "Could not sync ${NETPLAN_FIX_SCRIPT_NAME} to ${CONFIG_DIR}."
+    return 1
+}
+
+resolve_netplan_fix_script() {
+    local src_dir script tmp
+
+    src_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || src_dir=""
+    if [[ -n "$src_dir" && -r "${src_dir}/${NETPLAN_FIX_SCRIPT_NAME}" ]]; then
+        printf '%s' "${src_dir}/${NETPLAN_FIX_SCRIPT_NAME}"
+        return 0
+    fi
+
+    if [[ -r "$NETPLAN_FIX_INSTALLED" ]]; then
+        printf '%s' "$NETPLAN_FIX_INSTALLED"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    info "Downloading ${NETPLAN_FIX_SCRIPT_NAME} from GitHub..."
+    if ! curl_download "$NETPLAN_FIX_RAW_URL" "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if ! head -1 "$tmp" | grep -q '#!/usr/bin/env bash'; then
+        rm -f "$tmp"
+        return 1
+    fi
+    chmod +x "$tmp"
+    printf '%s' "$tmp"
+}
+
+confirm_yes() {
+    local prompt="${1:-Continue?}"
+    local confirm=""
+    read -r -p "${prompt} [y/N]: " confirm || true
+    [[ "${confirm,,}" == "y" ]]
+}
+
+is_ubuntu_host() {
+    [[ "$OS_ID" == "ubuntu" ]]
+}
+
+docker_network_precheck() {
+    if ! is_ubuntu_host; then
+        warn "Docker Bridge repair is supported only on Ubuntu."
+        return 1
+    fi
+    if ! command -v docker &>/dev/null; then
+        err "Docker is not installed."
+        return 1
+    fi
+    if command -v systemctl &>/dev/null && ! systemctl is-active --quiet docker 2>/dev/null; then
+        err "Docker is installed but not running."
+        return 1
+    fi
+    return 0
+}
+
+run_netplan_fix_command() {
+    local cmd="$1"
+    local script="" status=0 cleanup_script=""
+    local src_dir=""
+
+    script="$(resolve_netplan_fix_script)" || {
+        err "Could not find or download ${NETPLAN_FIX_SCRIPT_NAME}."
+        return 1
+    }
+
+    src_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || src_dir=""
+    if [[ "$script" != "$NETPLAN_FIX_INSTALLED" ]] \
+        && [[ -z "$src_dir" || "$script" != "${src_dir}/${NETPLAN_FIX_SCRIPT_NAME}" ]]; then
+        cleanup_script="$script"
+    fi
+
+    set +e
+    PASARGUARDBOT_CONFIG_DIR="$CONFIG_DIR" bash "$script" "$cmd"
+    status=$?
+    set -e
+
+    [[ -n "$cleanup_script" ]] && rm -f "$cleanup_script"
+    return "$status"
+}
+
+handle_netplan_reboot_prompt() {
+    if confirm_yes "Reboot the server now?"; then
+        warn "Rebooting..."
+        sync
+        systemctl reboot
+    else
+        warn "Run \`reboot\` manually, then run PasarguardBot manager again."
+    fi
+}
+
+handle_netplan_repair_exit() {
+    local status="$1"
+
+    case "$status" in
+        0)
+            ok "Docker Bridge networking is working or was repaired successfully."
+            info "No server reboot is required."
+            ;;
+        10)
+            ok "The network configuration was repaired."
+            handle_netplan_reboot_prompt
+            ;;
+        20)
+            err "This operating system or required tools are not supported."
+            ;;
+        21)
+            err "The known Netplan wildcard file was not found."
+            warn "The Docker Bridge issue may have a different cause."
+            ;;
+        30)
+            err "Could not download the Docker test image."
+            warn "Check internet connectivity and Docker registry access."
+            ;;
+        40)
+            warn "Automatic repair was refused to keep the network safe."
+            info "No changes were made."
+            ;;
+        41)
+            err "Netplan validation failed; the script attempted to roll back."
+            ;;
+        50)
+            err "Rollback of the repair attempt failed."
+            ;;
+        *)
+            err "Unexpected exit code from ${NETPLAN_FIX_SCRIPT_NAME}: ${status}"
+            ;;
+    esac
+}
+
+handle_netplan_check_exit() {
+    local status="$1"
+
+    case "$status" in
+        0)
+            ok "Docker Bridge networking is healthy."
+            ;;
+        1)
+            err "Docker Bridge test failed."
+            ;;
+        20)
+            err "This operating system or required tools are not supported."
+            ;;
+        30)
+            err "Could not download the Docker test image."
+            warn "Check internet connectivity and Docker registry access."
+            ;;
+        *)
+            err "Unexpected exit code from ${NETPLAN_FIX_SCRIPT_NAME}: ${status}"
+            ;;
+    esac
+}
+
+handle_netplan_rollback_exit() {
+    local status="$1"
+
+    case "$status" in
+        0)
+            ok "Netplan rollback completed."
+            ;;
+        10)
+            ok "Original Netplan file restored."
+            handle_netplan_reboot_prompt
+            ;;
+        20)
+            err "This operating system or required tools are not supported."
+            ;;
+        50)
+            err "No repair marker or disabled Netplan file was found."
+            ;;
+        *)
+            err "Unexpected exit code from ${NETPLAN_FIX_SCRIPT_NAME}: ${status}"
+            ;;
+    esac
+}
+
+action_docker_network_check() {
+    local status
+
+    draw_banner
+    docker_network_precheck || {
+        pause
+        return 0
+    }
+
+    info "Checking Docker Bridge networking..."
+    echo
+    run_netplan_fix_command check
+    status=$?
+    echo
+    handle_netplan_check_exit "$status"
+    pause
+}
+
+action_docker_network_repair() {
+    local status
+
+    draw_banner
+    docker_network_precheck || {
+        pause
+        return 0
+    }
+
+    echo -e "${C_YELLOW}${C_BOLD}  ⚠  Repair Docker Bridge${C_RESET}"
+    echo
+    echo "  This operation checks Docker Bridge networking and may:"
+    echo "  - back up and disable the broken Netplan wildcard file"
+    echo "  - restart Docker"
+    echo "  - require one server reboot"
+    echo
+    warn "Existing Docker containers may restart."
+    echo
+    confirm_yes "Continue?" || {
+        info "Cancelled."
+        pause
+        return 0
+    }
+
+    echo
+    info "Running Docker Bridge repair..."
+    echo
+    run_netplan_fix_command fix
+    status=$?
+    echo
+    handle_netplan_repair_exit "$status"
+    pause
+}
+
+action_docker_network_rollback() {
+    local status
+
+    draw_banner
+    docker_network_precheck || {
+        pause
+        return 0
+    }
+
+    echo -e "${C_YELLOW}${C_BOLD}  ⚠  Rollback Netplan Repair${C_RESET}"
+    echo
+    echo "  This will restore the Netplan file disabled by the Docker network repair."
+    echo "  A server reboot may be required."
+    echo
+    confirm_yes "Continue?" || {
+        info "Cancelled."
+        pause
+        return 0
+    }
+
+    echo
+    info "Rolling back Netplan repair..."
+    echo
+    run_netplan_fix_command rollback
+    status=$?
+    echo
+    handle_netplan_rollback_exit "$status"
+    pause
+}
+
+action_docker_network() {
+    while true; do
+        draw_banner
+        echo -e "${C_BOLD}  Docker network${C_RESET}"
+        echo
+        echo "  1) Check Docker Bridge"
+        echo "  2) Repair Docker Bridge"
+        echo "  3) Rollback Netplan Repair"
+        echo "  0) Back"
+        echo
+        read -r -p "Choice: " choice || return 0
+
+        case "$choice" in
+            1) action_docker_network_check ;;
+            2) action_docker_network_repair ;;
+            3) action_docker_network_rollback ;;
+            0) return 0 ;;
+            *) warn "Invalid choice."; sleep 1 ;;
+        esac
+    done
 }
 
 manager_command_ready() {
@@ -1287,6 +1601,7 @@ main_menu() {
             7) action_status ;;
             8) action_urls ;;
             9) action_update_script ;;
+            10) action_docker_network ;;
             0|q|Q) draw_banner; ok "Goodbye!"; exit 0 ;;
             *) warn "Invalid option."; sleep 1 ;;
         esac
