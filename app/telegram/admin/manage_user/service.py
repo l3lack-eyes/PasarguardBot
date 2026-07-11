@@ -4,7 +4,7 @@ import asyncio
 import random
 
 from httpx import HTTPStatusError
-from pasarguard import GroupsResponse, PasarguardAPI, UserCreate
+from pasarguard import PasarguardAPI, UserCreate
 from pasarguard.enums import UserDataLimitResetStrategy
 from telethon import Button
 from telethon.tl.types import (
@@ -19,6 +19,7 @@ from app.db.crud.panels import PanelsManager
 from app.db.crud.services import ServiceCRUD
 from app.db.crud.user import UserCRUD
 from app.logger import LogType, get_logger
+from app.services.panels.auth import fetch_panel_groups_with_auth
 from app.services.panels.groups import resolve_panel_group_ids
 from app.telegram.admin.manage_user import states
 from app.telegram.shared.utils.logging import send_log_message
@@ -63,7 +64,7 @@ async def finalize_admin_config(event, username: str):
             return
 
     CodeService = random.randint(10000, 9999999)
-    groups_resp: GroupsResponse = await PasarguardAPI(panel.base_url).get_all_groups(panel.cookie)
+    groups_resp = await fetch_panel_groups_with_auth(panel)
     group_ids: list[int] = resolve_panel_group_ids(panel, groups_resp)
     new_user = UserCreate(
         username=username,

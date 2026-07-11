@@ -17,6 +17,7 @@ from app.logger import get_logger
 from app.services.panels.auth import (
     AUTH_API_KEY,
     PANEL_AUTH_PLACEHOLDER_USERNAME,
+    fetch_panel_groups as fetch_groups_from_api,
     verify_panel_api_key,
     verify_panel_password,
 )
@@ -204,7 +205,7 @@ async def panel_admin_message_handler(event: Message):
 
         try:
             authed, _token = await verify_panel_password(panel_url, panel_username, panel_password)
-            groups_resp = await authed.get_all_groups()
+            groups_resp = await fetch_groups_from_api(authed)
             groups_data = [(group.id, group.name) for group in groups_resp.groups]
             cache_panel_groups("add", event.sender_id, groups_data)
             await set_user_state(event.sender_id, "panel_add_groups_list", groups_data)
@@ -244,7 +245,7 @@ async def panel_admin_message_handler(event: Message):
 
         try:
             authed = await verify_panel_api_key(panel_url, api_key)
-            groups_resp = await authed.get_all_groups()
+            groups_resp = await fetch_groups_from_api(authed)
             groups_data = [(group.id, group.name) for group in groups_resp.groups]
             cache_panel_groups("add", event.sender_id, groups_data)
             await set_user_state(event.sender_id, "panel_add_groups_list", groups_data)
@@ -298,7 +299,6 @@ async def panel_admin_message_handler(event: Message):
             return
         try:
             authed, jwt_token = await verify_panel_password(panel.base_url, panel_username, msg)
-            await authed.get_all_groups()
             await PanelsManager().update_panel(
                 panel_code,
                 auth_type="password",
@@ -329,7 +329,6 @@ async def panel_admin_message_handler(event: Message):
         api_key = msg.strip()
         try:
             authed = await verify_panel_api_key(panel.base_url, api_key)
-            await authed.get_all_groups()
             await PanelsManager().update_panel(
                 panel_code,
                 auth_type=AUTH_API_KEY,

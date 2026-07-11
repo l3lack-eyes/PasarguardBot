@@ -7,7 +7,7 @@ import time
 
 import httpx
 from httpx import HTTPStatusError
-from pasarguard import GroupsResponse, PasarguardAPI, UserCreate
+from pasarguard import PasarguardAPI, UserCreate
 from pasarguard.enums import UserDataLimitResetStrategy
 from telethon import Button
 from telethon.tl.types import (
@@ -27,6 +27,7 @@ from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserCRUD, update_Money
 from app.logger import LogType, get_logger
 from app.services.billing.sticky_discount import discounted_price, get_sticky_discount
+from app.services.panels.auth import fetch_panel_groups_with_auth
 from app.services.panels.config_links import get_selected_single_config_links_text
 from app.services.panels.groups import resolve_panel_group_ids
 from app.services.panels.nodes import filter_nodes_by_plan_type, format_node_name_for_display
@@ -370,7 +371,7 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
     panel = await PanelsManager().get_panel_by_code(code=panel_code)
     code_service = random.randint(10000, 9999999)
     username = await get_data(event.sender_id, "username")
-    groups_resp: GroupsResponse = await PasarguardAPI(panel.base_url).get_all_groups(panel.cookie)
+    groups_resp = await fetch_panel_groups_with_auth(panel)
     group_ids = resolve_panel_group_ids(panel, groups_resp)
 
     reset_strategy = UserDataLimitResetStrategy.NO_RESET

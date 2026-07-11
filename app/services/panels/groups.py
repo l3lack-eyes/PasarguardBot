@@ -6,13 +6,14 @@ import json
 from collections.abc import Callable
 from random import randint
 
-from pasarguard import GroupsResponse
 from telethon import Button
 
 from app.db.crud.panels import PanelsManager
 from app.services.panels.auth import (
     AUTH_API_KEY,
     PANEL_AUTH_PLACEHOLDER_USERNAME,
+    PanelGroupsResponse,
+    fetch_panel_groups as fetch_groups_from_api,
     fetch_panel_groups_with_auth,
     verify_panel_api_key,
     verify_panel_password,
@@ -68,7 +69,7 @@ def group_ids_to_step_data(group_ids: list[int]) -> str:
     return ",".join(str(i) for i in sorted({int(g) for g in group_ids}))
 
 
-def resolve_panel_group_ids(panel, groups_resp: GroupsResponse) -> list[int]:
+def resolve_panel_group_ids(panel, groups_resp: PanelGroupsResponse) -> list[int]:
     selected_ids = sorted(
         {gid for gid in panel_default_group_ids(panel) if any(g.id == gid for g in groups_resp.groups)}
     )
@@ -77,7 +78,7 @@ def resolve_panel_group_ids(panel, groups_resp: GroupsResponse) -> list[int]:
     return [g.id for g in groups_resp.groups]
 
 
-def get_panel_default_group_name(panel, groups_resp: GroupsResponse) -> str:
+def get_panel_default_group_name(panel, groups_resp: PanelGroupsResponse) -> str:
     groups_map = {g.id: g.name for g in groups_resp.groups}
     selected_ids = panel_default_group_ids(panel)
     if not groups_resp.groups:
@@ -93,7 +94,7 @@ def get_panel_default_group_name(panel, groups_resp: GroupsResponse) -> str:
     return f"{len(selected_names)} گروه انتخاب‌شده"
 
 
-async def fetch_panel_groups(panel) -> GroupsResponse:
+async def fetch_panel_groups(panel) -> PanelGroupsResponse:
     return await fetch_panel_groups_with_auth(panel)
 
 
@@ -108,7 +109,7 @@ async def create_panel_with_group(user_id: int, default_group_ids: list[int] | N
             raise ValueError("اطلاعات پنل کامل نیست.")
         panel_url = panel_url.strip()
         authed = await verify_panel_api_key(panel_url, api_key)
-        groups_resp = await authed.get_all_groups()
+        groups_resp = await fetch_groups_from_api(authed)
         stored_password = ""
         cookie = api_key
         panel_username = PANEL_AUTH_PLACEHOLDER_USERNAME
@@ -121,7 +122,7 @@ async def create_panel_with_group(user_id: int, default_group_ids: list[int] | N
         panel_username = panel_username.strip()
         panel_password = panel_password.strip()
         authed, jwt_token = await verify_panel_password(panel_url, panel_username, panel_password)
-        groups_resp = await authed.get_all_groups()
+        groups_resp = await fetch_groups_from_api(authed)
         stored_password = encrypt_data(panel_password)
         cookie = jwt_token
 

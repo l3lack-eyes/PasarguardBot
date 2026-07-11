@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import time
 
-from pasarguard import GroupsResponse, PasarguardAPI, UserCreate
+from pasarguard import PasarguardAPI, UserCreate
 from pasarguard.enums import UserDataLimitResetStrategy
 from telethon import Button, events
 from telethon.tl.custom import Message
@@ -18,6 +18,7 @@ from app.db.crud.services import ServiceCRUD
 from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserCRUD
 from app.logger import LogType, get_logger
+from app.services.panels.auth import fetch_panel_groups_with_auth
 from app.services.panels.config_links import get_selected_single_config_links_text
 from app.services.panels.settings import panel_test_duration_days, panel_test_volume_gb
 from app.services.subscriptions.links import format_subscription_links_for_message
@@ -104,7 +105,7 @@ async def free_trial_handler(event: Message):
         code_service = random.randint(10000, 9999999)
         await UserCRUD().update_user(user_id=user_id, tested=1)
         username = f"test_{code_service}"
-        groups_resp: GroupsResponse = await PasarguardAPI(panel.base_url).get_all_groups(panel.cookie)
+        groups_resp = await fetch_panel_groups_with_auth(panel)
         group_ids: list[int] = _resolve_panel_group_ids(panel, groups_resp)
 
         start_time = time.time()

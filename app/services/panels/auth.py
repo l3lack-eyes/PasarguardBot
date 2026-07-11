@@ -1,5 +1,5 @@
 from httpx import HTTPStatusError
-from pasarguard import PasarguardAPI
+from pasarguard import GroupsResponse, GroupsSimpleResponse, PasarguardAPI
 
 from app.db.crud.panels import PanelsManager
 from app.services.panels.cookies import format_panel_cookie_validity, panel_cookie_needs_refresh
@@ -8,6 +8,10 @@ from app.utils.security.crypto import decrypt_data
 AUTH_PASSWORD = "password"
 AUTH_API_KEY = "api_key"
 PANEL_AUTH_PLACEHOLDER_USERNAME = "-"
+
+_GROUPS_FALLBACK_STATUSES = frozenset({403, 404, 405})
+
+PanelGroupsResponse = GroupsResponse | GroupsSimpleResponse
 
 
 def panel_uses_api_key(panel) -> bool:
@@ -28,9 +32,18 @@ def create_panel_api(panel) -> PasarguardAPI:
     return PasarguardAPI(base_url=panel.base_url, token=panel.cookie)
 
 
+async def fetch_panel_groups(api: PasarguardAPI) -> PanelGroupsResponse:
+    try:
+        return await api.get_all_groups()
+    except HTTPStatusError as e:
+        if e.response.status_code in _GROUPS_FALLBACK_STATUSES:
+            return await api.get_groups_simple(all=True)
+        raise
+
+
 async def verify_panel_api_key(base_url, api_key) -> PasarguardAPI:
     api = PasarguardAPI(base_url=base_url, api_key=api_key.strip())
-    await api.get_all_groups()
+    await fetch_panel_groups(api)
     return api
 
 
@@ -38,7 +51,7 @@ async def verify_panel_password(base_url, username, password):
     api = PasarguardAPI(base_url=base_url)
     token = await api.get_token(username=username.strip(), password=password.strip())
     authed = PasarguardAPI(base_url=base_url, token=token.access_token)
-    await authed.get_all_groups()
+    await fetch_panel_groups(authed)
     return authed, token.access_token
 
 
@@ -51,14 +64,14 @@ async def refresh_panel_cookie(panel) -> str:
     return token.access_token
 
 
-async def fetch_panel_groups_with_auth(panel):
+async def fetch_panel_groups_with_auth(panel) -> PanelGroupsResponse:
     api = create_panel_api(panel)
     try:
-        return await api.get_all_groups()
+        return await fetch_panel_groups(api)
     except HTTPStatusError as e:
         if e.response.status_code == 401 and not panel_uses_api_key(panel):
             cookie = await refresh_panel_cookie(panel)
-            return await PasarguardAPI(base_url=panel.base_url, token=cookie).get_all_groups()
+            return await fetch_panel_groups(PasarguardAPI(base_url=panel.base_url, token=cookie))
         raise
 
 

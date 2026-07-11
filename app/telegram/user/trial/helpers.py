@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pasarguard import GroupsResponse
+from app.services.panels.auth import PanelGroupsResponse
 
 from app.db.crud.user import UserCRUD
 from app.services.panels.settings import panel_default_group_ids
@@ -10,7 +10,7 @@ from app.services.panels.settings import panel_default_group_ids
 BOT_LANGUAGE = "fa"
 
 
-def _resolve_panel_group_ids(panel, groups_resp: GroupsResponse) -> list[int]:
+def _resolve_panel_group_ids(panel, groups_resp: PanelGroupsResponse) -> list[int]:
     selected_ids = sorted(
         {gid for gid in panel_default_group_ids(panel) if any(g.id == gid for g in groups_resp.groups)}
     )
