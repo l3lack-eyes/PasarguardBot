@@ -1500,6 +1500,29 @@ action_update_script() {
     pause
 }
 
+compose_running_services() {
+    docker_compose ps --status running --services 2>/dev/null
+}
+
+action_logs_live() {
+    local -a services=()
+    local svc
+
+    is_installed || die "Install the bot first (option 1)."
+
+    while IFS= read -r svc; do
+        [[ -n "$svc" ]] && services+=("$svc")
+    done < <(compose_running_services)
+
+    if [[ ${#services[@]} -eq 0 ]]; then
+        die "No running containers found."
+    fi
+
+    info "Live logs (${services[*]}) — press Ctrl+C to exit"
+    echo
+    docker_compose logs -f --tail=200 -t "${services[@]}"
+}
+
 action_logs() {
     draw_banner
     is_installed || die "Install the bot first (option 1)."
@@ -1615,7 +1638,7 @@ case "${1:-}" in
     uninstall)      action_uninstall ;;
     update)         action_update ;;
     update-script)  action_update_script ;;
-    logs)           action_logs ;;
+    logs)           action_logs_live ;;
     restart)        action_restart ;;
     status)         action_status ;;
     urls)           action_urls ;;
