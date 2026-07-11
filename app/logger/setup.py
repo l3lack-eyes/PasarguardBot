@@ -1,4 +1,4 @@
-"""Centralized logging setup and helpers for the MarzbanBot application."""
+"""Centralized logging setup and helpers for the PasarGuardBot application."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def format_fields(**kwargs: Any) -> dict[str, Any]:
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
-    """Return a logger under the ``marzbanbot`` namespace."""
+    """Return a logger under the ``PasarGuardBot`` namespace."""
     if not _configured:
         setup_logging(
             level=LOG_LEVEL,
@@ -229,7 +229,7 @@ def log_flood_wait(
 
 def log_startup_banner(logger: logging.Logger) -> None:
     """Print a concise startup banner (no multi-line box spam)."""
-    log(logger, logging.INFO, f"{LogTag.BOOT} MarzbanBot started")
+    log(logger, logging.INFO, f"{LogTag.BOOT} PasarGuardBot started")
 
 
 def init_logging() -> logging.Logger:

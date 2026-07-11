@@ -30,7 +30,7 @@ QUIET_LOGGERS: dict[str, int] = {
 }
 
 # Application log namespace
-APP_LOGGER_NAME = "marzbanbot"
+APP_LOGGER_NAME = "PasarGuardBot"
 
 
 def resolve_log_level(name: str | None = None) -> int:
