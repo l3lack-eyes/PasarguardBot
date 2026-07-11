@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.1.1"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -344,6 +344,7 @@ bootstrap() {
     require_root
     detect_os
     install_base_packages
+    ensure_manager_command
 }
 
 # ── Docker install ─────────────────────────────────────────────────────────────
@@ -937,6 +938,22 @@ prune_dangling_images_safe() {
     docker image prune -f >/dev/null 2>&1 || true
 }
 
+install_manager_from_file() {
+    local src="$1"
+    head -1 "$src" | grep -q '#!/usr/bin/env bash' || {
+        die "Manager script is invalid (missing bash shebang)."
+    }
+    mkdir -p "$CONFIG_DIR"
+    cp "$src" "$MANAGER_SCRIPT"
+    chmod +x "$MANAGER_SCRIPT"
+    ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
+    hash -r 2>/dev/null || true
+}
+
+manager_command_ready() {
+    [[ -x "$MANAGER_SCRIPT" && -e "$MANAGER_BIN" ]]
+}
+
 install_manager_command() {
     local tmp
     tmp="$(mktemp)"
@@ -954,17 +971,26 @@ install_manager_command() {
         fi
     fi
 
-    head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || {
-        rm -f "$tmp"
-        die "Downloaded manager script is invalid."
-    }
-
-    mkdir -p "$CONFIG_DIR"
-    cp "$tmp" "$MANAGER_SCRIPT"
+    install_manager_from_file "$tmp"
     rm -f "$tmp"
-    chmod +x "$MANAGER_SCRIPT"
-    ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
     ok "pasarguardbot command installed at ${MANAGER_BIN}"
+}
+
+# Register /usr/local/bin/pasarguardbot when missing (e.g. first curl | bash run).
+ensure_manager_command() {
+    if manager_command_ready; then
+        return 0
+    fi
+
+    local src="${BASH_SOURCE[0]:-}"
+    if [[ -n "$src" && -r "$src" && -s "$src" ]]; then
+        info "Registering pasarguardbot command..."
+        install_manager_from_file "$src"
+        ok "pasarguardbot command installed at ${MANAGER_BIN}"
+        return 0
+    fi
+
+    install_manager_command
 }
 
 # ── Actions ───────────────────────────────────────────────────────────────────
@@ -1144,18 +1170,16 @@ action_update_script() {
         die "Could not read SCRIPT_VERSION from downloaded script."
     fi
 
+    # Always install (even when versions match) so /usr/local/bin/pasarguardbot exists.
+    install_manager_from_file "$tmp"
+    rm -f "$tmp"
+
     if [[ "$new_ver" == "$old_ver" ]]; then
-        rm -f "$tmp"
         ok "Manager script is already up to date ($(format_version "$old_ver"))."
+        ok "pasarguardbot command ensured at ${MANAGER_BIN}"
         pause
         return 0
     fi
-
-    mkdir -p "$CONFIG_DIR"
-    cp "$tmp" "$MANAGER_SCRIPT"
-    rm -f "$tmp"
-    chmod +x "$MANAGER_SCRIPT"
-    ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
 
     ok "Manager script updated: $(format_version "$old_ver") → $(format_version "$new_ver")"
     warn "Run pasarguardbot again to use the new script."
