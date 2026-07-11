@@ -13,7 +13,8 @@ LABEL org.opencontainers.image.title="PasarguardBot" \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_NO_SYNC=1
 
 WORKDIR /app
 
