@@ -32,7 +32,7 @@
 ## نصب سریع (لینوکس)
 
 ```bash
-sudo mkdir -p /opt/pasarguardbot && curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh | sudo tee /opt/pasarguardbot/pasarguardbot.sh > /dev/null && sudo chmod +x /opt/pasarguardbot/pasarguardbot.sh && sudo ln -sf /opt/pasarguardbot/pasarguardbot.sh /usr/local/bin/pasarguardbot && sudo pasarguardbot
+bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh)
 ```
 
 بعد از نصب: `pasarguardbot`

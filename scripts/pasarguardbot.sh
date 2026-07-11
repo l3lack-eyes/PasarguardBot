@@ -1,22 +1,37 @@
 #!/usr/bin/env bash
 # PasarguardBot — Docker install & management script
 # https://github.com/AmirKenzo/PasarguardBot
+#
+# Install:
+#   bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh)
 
 set -euo pipefail
 
-# ── Paths & repo ──────────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.0.4"
-readonly REPO_URL="https://github.com/AmirKenzo/PasarguardBot.git"
+# ── Paths & constants ──────────────────────────────────────────────────────────
+readonly SCRIPT_VERSION="1.1.0"
 readonly CONFIG_DIR="/opt/pasarguardbot"
-readonly SOURCE_DIR="/var/lib/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
 readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/docker-compose.yml"
+readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/.env.example"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
+readonly BOT_IMAGE_TAG="latest"
 readonly PHPMYADMIN_PORT=6163
+readonly MIN_DISK_MB=2048
+readonly CURL_CONNECT_TIMEOUT=10
+readonly CURL_MAX_TIME=60
+readonly CURL_RETRIES=3
+readonly CURL_RETRY_DELAY=2
+
+# Populated by detect_os()
+OS_ID=""
+OS_ID_LIKE=""
+OS_VERSION_ID=""
+OS_PRETTY_NAME=""
+PKG_MANAGER=""
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -41,11 +56,19 @@ die()     { err "$*"; exit 1; }
 
 pause() {
     echo
-    read -r -p "Press Enter to continue..." _
+    read -r -p "Press Enter to continue..." _ || true
 }
 
 rand_hex()  { openssl rand -hex "${1:-16}"; }
 rand_b64()  { openssl rand -base64 "${1:-24}" | tr -d '/+=' | head -c "${1:-24}"; }
+
+safe_clear() {
+    if command -v clear &>/dev/null \
+        && [[ -t 1 ]] \
+        && [[ -n "${TERM:-}" ]]; then
+        clear 2>/dev/null || true
+    fi
+}
 
 # Always show versions as a single "vX.Y.Z" (supports both 1.0.0 and v1.0.0 tags).
 format_version() {
@@ -61,7 +84,49 @@ format_version() {
 }
 
 require_root() {
-    [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "This script must be run as root: sudo $0"
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "This script must be run as root: sudo bash $0"
+}
+
+# Allow: bash <(curl -fsSL ...scripts/pasarguardbot.sh) without an outer sudo.
+elevate_if_needed() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        return 0
+    fi
+    command -v sudo &>/dev/null || die "This script must be run as root (sudo not found)."
+
+    local tmp src="${BASH_SOURCE[0]:-}"
+    tmp="$(mktemp)"
+    if [[ -n "$src" && -r "$src" ]]; then
+        cp "$src" "$tmp"
+    else
+        rm -f "$tmp"
+        die "Re-run as root: sudo bash <(curl -fsSL ${SCRIPT_RAW_URL})"
+    fi
+    chmod +x "$tmp"
+    info "Root required — re-running with sudo..."
+    exec sudo bash "$tmp" "$@"
+}
+
+curl_get() {
+    curl --fail --silent --show-error --location \
+        --retry "$CURL_RETRIES" \
+        --retry-delay "$CURL_RETRY_DELAY" \
+        --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+        --max-time "$CURL_MAX_TIME" \
+        "$@"
+}
+
+curl_download() {
+    local url="$1"
+    local dest="$2"
+    curl_get -o "$dest" "$url"
+}
+
+explain_network_failure() {
+    local context="${1:-download}"
+    err "Failed to ${context}."
+    err "Possible causes: GitHub Raw unreachable, DNS failure, firewall, or network timeout."
+    err "Check connectivity, then retry."
 }
 
 set_env_var() {
@@ -77,16 +142,25 @@ set_env_var() {
 
 docker_compose() {
     if docker compose version &>/dev/null; then
-        docker compose --project-directory "$SOURCE_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+        docker compose \
+            --project-directory "$CONFIG_DIR" \
+            -f "$COMPOSE_FILE" \
+            --env-file "$ENV_FILE" \
+            "$@"
     elif command -v docker-compose &>/dev/null; then
-        docker-compose --project-directory "$SOURCE_DIR" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+        warn "Using legacy docker-compose; prefer Docker Compose V2 (docker compose)."
+        docker-compose \
+            --project-directory "$CONFIG_DIR" \
+            -f "$COMPOSE_FILE" \
+            --env-file "$ENV_FILE" \
+            "$@"
     else
-        die "Docker Compose not found."
+        die "Docker Compose not found. Install Docker Compose V2 (docker compose) and retry."
     fi
 }
 
 is_installed() {
-    [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" && -d "$SOURCE_DIR/.git" ]]
+    [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]
 }
 
 get_env_value() {
@@ -95,11 +169,468 @@ get_env_value() {
     grep -E "^${key}=" "$file" 2>/dev/null | tail -1 | cut -d= -f2- || true
 }
 
+# ── OS detection & bootstrap ───────────────────────────────────────────────────
+detect_os() {
+    [[ -f /etc/os-release ]] || die "Cannot detect OS: /etc/os-release not found."
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+
+    OS_ID="${ID:-unknown}"
+    OS_ID_LIKE="${ID_LIKE:-}"
+    OS_VERSION_ID="${VERSION_ID:-}"
+    OS_PRETTY_NAME="${PRETTY_NAME:-$OS_ID}"
+    if [[ -n "$OS_VERSION_ID" ]]; then
+        OS_PRETTY_NAME="${OS_PRETTY_NAME} (${OS_VERSION_ID})"
+    fi
+
+    local family
+    family="$(printf '%s %s' "$OS_ID" "$OS_ID_LIKE" | tr '[:upper:]' '[:lower:]')"
+
+    if command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt-get"
+    elif command -v dnf &>/dev/null; then
+        PKG_MANAGER="dnf"
+    elif command -v yum &>/dev/null; then
+        PKG_MANAGER="yum"
+    elif command -v pacman &>/dev/null; then
+        PKG_MANAGER="pacman"
+    elif command -v zypper &>/dev/null; then
+        PKG_MANAGER="zypper"
+    elif command -v apk &>/dev/null; then
+        PKG_MANAGER="apk"
+    else
+        die "Unsupported package manager on ${OS_PRETTY_NAME}. Supported: apt-get, dnf, yum, pacman, zypper, apk."
+    fi
+
+    case "$family" in
+        *ubuntu*|*debian*|*kali*|*linuxmint*|*pop*|*raspbian*) ;;
+        *rhel*|*centos*|*rocky*|*alma*|*fedora*|*amzn*|*amazon*|*ol*|*oracle*) ;;
+        *arch*|*manjaro*) ;;
+        *suse*|*sles*) ;;
+        *alpine*) ;;
+        *)
+            warn "OS '${OS_PRETTY_NAME}' is not in the tested list; continuing with ${PKG_MANAGER}."
+            ;;
+    esac
+}
+
+pkg_is_installed() {
+    local pkg="$1"
+    case "$PKG_MANAGER" in
+        apt-get)
+            dpkg -s "$pkg" &>/dev/null
+            ;;
+        dnf|yum)
+            rpm -q "$pkg" &>/dev/null
+            ;;
+        pacman)
+            pacman -Qi "$pkg" &>/dev/null
+            ;;
+        zypper)
+            rpm -q "$pkg" &>/dev/null
+            ;;
+        apk)
+            apk info -e "$pkg" &>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+run_pkg_install() {
+    local -a pkgs=("$@")
+    local -a missing=()
+    local pkg cmd_desc
+
+    [[ ${#pkgs[@]} -gt 0 ]] || return 0
+
+    for pkg in "${pkgs[@]}"; do
+        if ! pkg_is_installed "$pkg"; then
+            missing+=("$pkg")
+        fi
+    done
+
+    [[ ${#missing[@]} -gt 0 ]] || return 0
+
+    info "Installing packages: ${missing[*]}"
+    cmd_desc="${PKG_MANAGER} install ${missing[*]}"
+
+    case "$PKG_MANAGER" in
+        apt-get)
+            export DEBIAN_FRONTEND=noninteractive
+            if ! apt-get update -y; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: apt-get update -y"
+            fi
+            if ! apt-get install -y --no-install-recommends "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        dnf)
+            if ! dnf install -y "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        yum)
+            if ! yum install -y "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        pacman)
+            if ! pacman -Sy --noconfirm --needed "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        zypper)
+            if ! zypper --non-interactive install -y "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        apk)
+            if ! apk add --no-cache "${missing[@]}"; then
+                die "Package install failed on ${OS_PRETTY_NAME} (${PKG_MANAGER}). Failed command: ${cmd_desc}"
+            fi
+            ;;
+        *)
+            die "Unsupported package manager: ${PKG_MANAGER}"
+            ;;
+    esac
+}
+
+base_packages_for_os() {
+    case "$PKG_MANAGER" in
+        apt-get)
+            printf '%s\n' curl ca-certificates openssl coreutils ncurses-bin nano sed grep util-linux bash iproute2
+            ;;
+        dnf|yum)
+            printf '%s\n' curl ca-certificates openssl coreutils ncurses nano sed grep util-linux bash iproute
+            ;;
+        pacman)
+            printf '%s\n' curl ca-certificates openssl coreutils ncurses nano sed grep util-linux bash iproute2
+            ;;
+        zypper)
+            printf '%s\n' curl ca-certificates openssl coreutils ncurses-utils nano sed grep util-linux bash iproute2
+            ;;
+        apk)
+            printf '%s\n' curl ca-certificates openssl coreutils ncurses nano sed grep util-linux bash iproute2
+            ;;
+        *)
+            die "Unsupported package manager: ${PKG_MANAGER}"
+            ;;
+    esac
+}
+
+install_base_packages() {
+    local -a pkgs=()
+    local line
+
+    info "Bootstrapping base packages for ${OS_PRETTY_NAME} (${PKG_MANAGER})..."
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && pkgs+=("$line")
+    done < <(base_packages_for_os)
+
+    run_pkg_install "${pkgs[@]}"
+
+    for cmd in curl openssl sed grep; do
+        command -v "$cmd" &>/dev/null || die "Required command '${cmd}' is missing after package install on ${OS_PRETTY_NAME}."
+    done
+
+    ok "Base packages ready."
+}
+
+bootstrap() {
+    elevate_if_needed "$@"
+    require_root
+    detect_os
+    install_base_packages
+}
+
+# ── Docker install ─────────────────────────────────────────────────────────────
+docker_compose_available() {
+    docker compose version &>/dev/null || command -v docker-compose &>/dev/null
+}
+
+docker_engine_ready() {
+    command -v docker &>/dev/null && docker version &>/dev/null
+}
+
+start_docker_daemon() {
+    if command -v systemctl &>/dev/null; then
+        systemctl enable docker >/dev/null 2>&1 || true
+        systemctl start docker 2>/dev/null || systemctl restart docker 2>/dev/null || true
+        return 0
+    fi
+    if command -v rc-update &>/dev/null; then
+        rc-update add docker default >/dev/null 2>&1 || true
+        if command -v rc-service &>/dev/null; then
+            rc-service docker start 2>/dev/null || true
+        elif command -v service &>/dev/null; then
+            service docker start 2>/dev/null || true
+        fi
+        return 0
+    fi
+    if command -v service &>/dev/null; then
+        service docker start 2>/dev/null || true
+    fi
+}
+
+wait_for_docker_daemon() {
+    local i=0
+    local max=30
+    local log_out=""
+
+    info "Waiting for Docker daemon..."
+    while (( i < max )); do
+        if docker info &>/dev/null; then
+            ok "Docker daemon is ready."
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+
+    err "Docker daemon did not become ready."
+    if command -v systemctl &>/dev/null; then
+        log_out="$(systemctl status docker --no-pager 2>&1 || true)"
+        [[ -n "$log_out" ]] && echo "$log_out" >&2
+        log_out="$(journalctl -u docker -n 40 --no-pager 2>&1 || true)"
+        [[ -n "$log_out" ]] && echo "$log_out" >&2
+    elif command -v rc-service &>/dev/null; then
+        rc-service docker status >&2 || true
+    fi
+    die "Docker daemon is not running. Fix Docker, then retry."
+}
+
+verify_docker_stack() {
+    command -v docker &>/dev/null || die "docker command not found after install."
+    docker version >/dev/null || die "docker version failed. Docker Engine is not usable."
+    if docker compose version &>/dev/null; then
+        ok "Docker Compose V2 available: $(docker compose version --short 2>/dev/null || docker compose version | head -1)"
+    elif command -v docker-compose &>/dev/null; then
+        warn "Only legacy docker-compose found; Compose V2 (docker compose) is preferred."
+        docker-compose version >/dev/null || die "docker-compose is present but not working."
+    else
+        die "Docker Compose not found. Need 'docker compose' (V2) or docker-compose."
+    fi
+    wait_for_docker_daemon
+    docker info >/dev/null || die "docker info failed after daemon start."
+}
+
+install_docker_via_get_docker() {
+    local tmp
+    tmp="$(mktemp)"
+    info "Installing Docker Engine via get.docker.com..."
+    if ! curl_download "https://get.docker.com" "$tmp"; then
+        rm -f "$tmp"
+        explain_network_failure "download get.docker.com"
+        exit 1
+    fi
+    if ! sh "$tmp"; then
+        rm -f "$tmp"
+        die "get.docker.com installer failed on ${OS_PRETTY_NAME}."
+    fi
+    rm -f "$tmp"
+}
+
+try_install_packages_soft() {
+    local -a pkgs=("$@")
+    [[ ${#pkgs[@]} -gt 0 ]] || return 0
+    case "$PKG_MANAGER" in
+        apt-get)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -y --no-install-recommends "${pkgs[@]}" 2>/dev/null
+            ;;
+        dnf)
+            dnf install -y "${pkgs[@]}" 2>/dev/null
+            ;;
+        yum)
+            yum install -y "${pkgs[@]}" 2>/dev/null
+            ;;
+        pacman)
+            pacman -Sy --noconfirm --needed "${pkgs[@]}" 2>/dev/null
+            ;;
+        zypper)
+            zypper --non-interactive install -y "${pkgs[@]}" 2>/dev/null
+            ;;
+        apk)
+            apk add --no-cache "${pkgs[@]}" 2>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_docker_compose_plugin_fallback() {
+    if docker compose version &>/dev/null; then
+        return 0
+    fi
+
+    info "Installing Docker Compose plugin (fallback)..."
+    case "$PKG_MANAGER" in
+        apt-get)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -y >/dev/null 2>&1 || true
+            try_install_packages_soft docker-compose-plugin \
+                || try_install_packages_soft docker-compose \
+                || true
+            ;;
+        dnf|yum|zypper)
+            try_install_packages_soft docker-compose-plugin \
+                || try_install_packages_soft docker-compose \
+                || true
+            ;;
+        pacman)
+            try_install_packages_soft docker-compose || true
+            ;;
+        apk)
+            try_install_packages_soft docker-cli-compose \
+                || try_install_packages_soft docker-compose \
+                || true
+            ;;
+    esac
+}
+
+install_docker() {
+    if docker_engine_ready && docker_compose_available && docker info &>/dev/null; then
+        ok "Docker and Docker Compose are already installed."
+        verify_docker_stack
+        return 0
+    fi
+
+    info "Installing Docker Engine and Compose for ${OS_PRETTY_NAME}..."
+
+    case "$PKG_MANAGER" in
+        apt-get|dnf|yum|zypper)
+            # Official convenience script installs Docker CE + compose plugin on these families.
+            install_docker_via_get_docker
+            ;;
+        pacman)
+            run_pkg_install docker docker-compose
+            ;;
+        apk)
+            run_pkg_install docker docker-cli-compose
+            ;;
+        *)
+            die "Automatic Docker install is not supported with ${PKG_MANAGER} on ${OS_PRETTY_NAME}."
+            ;;
+    esac
+
+    start_docker_daemon
+    install_docker_compose_plugin_fallback
+    verify_docker_stack
+    ok "Docker installed."
+}
+
+# ── Preflight checks ───────────────────────────────────────────────────────────
+check_disk_space() {
+    local target avail_kb avail_mb
+    target="$CONFIG_DIR"
+    [[ -d "$target" ]] || target="$(dirname "$CONFIG_DIR")"
+    [[ -d "$target" ]] || target="/"
+
+    avail_kb="$(df -Pk "$target" 2>/dev/null | awk 'NR==2 {print $4}')"
+    avail_kb="${avail_kb:-0}"
+    avail_mb=$((avail_kb / 1024))
+
+    if (( avail_mb < MIN_DISK_MB )); then
+        die "Insufficient disk space on ${target}: ${avail_mb}MB free, need at least ${MIN_DISK_MB}MB."
+    fi
+    ok "Disk space OK (${avail_mb}MB free)."
+}
+
+port_in_use() {
+    local port="$1"
+    if command -v ss &>/dev/null; then
+        ss -ltn 2>/dev/null | grep -qE ":${port}\\s" && return 0
+        return 1
+    fi
+    if command -v netstat &>/dev/null; then
+        netstat -ltn 2>/dev/null | grep -qE ":${port}\\s" && return 0
+        return 1
+    fi
+    return 1
+}
+
+check_required_ports() {
+    local port
+    local -a ports=(6160 6161 6162 6163)
+    local busy=0
+
+    for port in "${ports[@]}"; do
+        if port_in_use "$port"; then
+            # Allow reinstall when our own containers already own the ports.
+            if docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -qE "pasarguardbot.*:${port}->|:.*:${port}->"; then
+                continue
+            fi
+            warn "Port ${port} appears to be in use."
+            busy=1
+        fi
+    done
+
+    if (( busy )); then
+        warn "Required ports may be occupied (6160 FastAPI, 6161 Redis, 6162 MariaDB, 6163 phpMyAdmin)."
+        read -r -p "Continue anyway? (y/N): " confirm || true
+        [[ "${confirm,,}" == "y" ]] || die "Aborted due to occupied ports."
+    fi
+}
+
+ensure_config_dirs() {
+    mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis}
+    chmod 700 "$CONFIG_DIR"
+}
+
+# ── Version / status (no network in menu) ──────────────────────────────────────
+get_installed_bot_version() {
+    local version revision digest short_id
+
+    if ! command -v docker &>/dev/null; then
+        printf '%s' '—'
+        return 0
+    fi
+
+    if ! docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" &>/dev/null; then
+        printf '%s' '—'
+        return 0
+    fi
+
+    version="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+        --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null || true)"
+    if [[ -n "$version" && "$version" != "<no value>" && "$version" != "null" ]]; then
+        format_version "$version"
+        return 0
+    fi
+
+    revision="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+        --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+    if [[ -n "$revision" && "$revision" != "<no value>" && "$revision" != "null" ]]; then
+        printf 'sha-%s' "${revision:0:7}"
+        return 0
+    fi
+
+    digest="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+        --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
+    if [[ -n "$digest" && "$digest" == *"@"* ]]; then
+        printf '%s' "${digest##*@}"
+        return 0
+    fi
+
+    short_id="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+        --format '{{.Id}}' 2>/dev/null | sed 's/^sha256://' | cut -c1-12 || true)"
+    if [[ -n "$short_id" ]]; then
+        printf '%s' "$short_id"
+        return 0
+    fi
+
+    printf '%s' '—'
+}
+
 detect_server_ip() {
     local ip=""
-    ip="$(curl -4 -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+    ip="$(curl_get --max-time 5 https://api.ipify.org 2>/dev/null || true)"
     if [[ -z "$ip" ]]; then
-        ip="$(curl -4 -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)"
+        ip="$(curl_get --max-time 5 https://ifconfig.me 2>/dev/null || true)"
     fi
     if [[ -z "$ip" ]]; then
         ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -134,36 +665,6 @@ show_service_urls() {
     warn "Replace the IP with your domain if you use one."
 }
 
-get_installed_bot_version() {
-    local version tag
-    if [[ -d "$SOURCE_DIR/.git" ]]; then
-        tag="$(get_current_tag 2>/dev/null || true)"
-        if [[ -n "$tag" ]]; then
-            format_version "$tag"
-            return 0
-        fi
-    fi
-    if [[ -f "${SOURCE_DIR}/pyproject.toml" ]]; then
-        version="$(
-            grep -E '^version = ' "${SOURCE_DIR}/pyproject.toml" 2>/dev/null \
-                | head -1 \
-                | sed -E 's/^version = "(.*)"/\1/'
-        )"
-        if [[ -n "$version" ]]; then
-            format_version "$version"
-            return 0
-        fi
-    fi
-    printf '%s' '—'
-}
-
-get_remote_script_version() {
-    curl -fsSL --max-time 10 "$SCRIPT_RAW_URL" 2>/dev/null \
-        | grep -m1 '^readonly SCRIPT_VERSION=' \
-        | sed -E 's/^readonly SCRIPT_VERSION="(.*)"/\1/' \
-        || true
-}
-
 get_container_state() {
     local name="$1"
     docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || printf '%s' 'missing'
@@ -175,52 +676,43 @@ get_bot_runtime_summary() {
         printf '%s' '—'
         return 0
     fi
-    running="$(docker_compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')"
-    total="$(docker_compose ps -a -q 2>/dev/null | wc -l | tr -d ' ')"
+    if ! docker info &>/dev/null; then
+        printf '%s' 'docker unavailable'
+        return 0
+    fi
+    running="$(docker_compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ' || true)"
+    total="$(docker_compose ps -a -q 2>/dev/null | wc -l | tr -d ' ' || true)"
+    running="${running:-0}"
+    total="${total:-0}"
     bot_state="$(get_container_state pasarguardbot)"
     printf '%s (%s/%s services running)' "$bot_state" "$running" "$total"
 }
 
 show_install_info() {
-    local installed_ver latest_tag latest_ver remote_script_ver bot_runtime fastapi_port
+    local installed_ver bot_runtime fastapi_port
 
     echo -e "  ${C_DIM}Manager script:${C_RESET}  $(format_version "$SCRIPT_VERSION")"
-
-    remote_script_ver="$(get_remote_script_version)" || remote_script_ver=""
-    if [[ -n "$remote_script_ver" && "$remote_script_ver" != "$SCRIPT_VERSION" ]]; then
-        echo -e "  ${C_DIM}Script latest:${C_RESET}   $(format_version "$remote_script_ver") ${C_YELLOW}(update available)${C_RESET}"
-    fi
+    echo -e "  ${C_DIM}Host OS:${C_RESET}         ${OS_PRETTY_NAME:-unknown}"
 
     if is_installed; then
         installed_ver="$(get_installed_bot_version)" || installed_ver="—"
-        latest_tag="$(resolve_latest_tag 2>/dev/null)" || latest_tag=""
-        latest_ver="$(format_version "$latest_tag")"
         bot_runtime="$(get_bot_runtime_summary)" || bot_runtime="—"
         fastapi_port="$(get_env_value "FASTAPI_PORT")"
         fastapi_port="${fastapi_port:-6160}"
 
-        echo -e "  ${C_DIM}Bot release:${C_RESET}    ${installed_ver}"
-        if [[ -n "$latest_tag" && "$latest_ver" != "$installed_ver" ]]; then
-            echo -e "  ${C_DIM}Latest release:${C_RESET}  ${latest_ver} ${C_YELLOW}(update available)${C_RESET}"
-        elif [[ -n "$latest_tag" ]]; then
-            echo -e "  ${C_DIM}Latest release:${C_RESET}  ${latest_ver}"
-        fi
+        echo -e "  ${C_DIM}Bot image:${C_RESET}       ${installed_ver}"
         echo -e "  ${C_DIM}Bot container:${C_RESET}  ${bot_runtime}"
         echo -e "  ${C_DIM}API port:${C_RESET}        ${fastapi_port}"
         echo -e "  ${C_DIM}Config:${C_RESET}          ${CONFIG_DIR}"
-        echo -e "  ${C_DIM}Source:${C_RESET}          ${SOURCE_DIR}"
-    else
-        latest_tag="$(resolve_latest_tag 2>/dev/null)" || latest_tag=""
-        [[ -n "$latest_tag" ]] && echo -e "  ${C_DIM}Latest release:${C_RESET}  $(format_version "$latest_tag")"
     fi
     echo
 }
 
 draw_banner() {
-    clear
+    safe_clear
     echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— Docker manager $(format_version "$SCRIPT_VERSION")${C_RESET}"
     echo
-    show_install_info
+    show_install_info || true
 }
 
 draw_menu() {
@@ -234,7 +726,7 @@ draw_menu() {
     echo -e "${C_BOLD}  ┌─────────────────────────────────────────┐${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  1) Install bot                           ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  2) Uninstall bot                         ${C_BOLD}│${C_RESET}"
-    echo -e "${C_BOLD}  │${C_RESET}  3) Update bot (release tag)              ${C_BOLD}│${C_RESET}"
+    echo -e "${C_BOLD}  │${C_RESET}  3) Update bot                            ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  4) View logs                             ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  5) Edit .env file                        ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  6) Full restart                          ${C_BOLD}│${C_RESET}"
@@ -246,66 +738,13 @@ draw_menu() {
     echo
 }
 
-# ── Prerequisites ─────────────────────────────────────────────────────────────
-install_docker() {
-    if command -v docker &>/dev/null && docker compose version &>/dev/null 2>&1; then
-        ok "Docker and Docker Compose are already installed."
-        return 0
-    fi
-
-    info "Installing Docker..."
-    if [[ -f /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-    else
-        die "Unsupported operating system."
-    fi
-
-    case "${ID:-}" in
-        ubuntu|debian)
-            apt-get update -qq
-            apt-get install -y -qq ca-certificates curl git openssl nano
-            curl -fsSL https://get.docker.com | sh
-            ;;
-        centos|rhel|rocky|almalinux|fedora)
-            if command -v dnf &>/dev/null; then
-                dnf install -y docker docker-compose-plugin git openssl nano curl
-            else
-                yum install -y docker docker-compose-plugin git openssl nano curl
-            fi
-            systemctl enable --now docker
-            ;;
-        *)
-            die "Automatic Docker install is not supported on this OS. Install Docker manually and retry."
-            ;;
-    esac
-
-    systemctl enable --now docker 2>/dev/null || true
-    ok "Docker installed."
-}
-
-install_prerequisites() {
-    info "Checking prerequisites..."
-    install_docker
-
-    for cmd in git openssl; do
-        command -v "$cmd" &>/dev/null || {
-            apt-get install -y -qq "$cmd" 2>/dev/null || yum install -y "$cmd" 2>/dev/null || true
-        }
-    done
-
-    command -v git &>/dev/null || die "git not found."
-    command -v openssl &>/dev/null || die "openssl not found."
-    ok "Prerequisites ready."
-}
-
 # ── Env generation ────────────────────────────────────────────────────────────
 prompt_required() {
-    local var_name="$1"
+    local _var_name="$1"
     local prompt_text="$2"
     local value=""
     while [[ -z "$value" ]]; do
-        read -r -p "$prompt_text: " value
+        read -r -p "$prompt_text: " value || true
         value="${value// /}"
         [[ -n "$value" ]] || warn "This value is required."
     done
@@ -316,7 +755,7 @@ prompt_with_default() {
     local prompt_text="$1"
     local default_value="$2"
     local value=""
-    read -r -p "${prompt_text} [${default_value}]: " value
+    read -r -p "${prompt_text} [${default_value}]: " value || true
     value="${value// /}"
     if [[ -z "$value" ]]; then
         value="$default_value"
@@ -336,19 +775,31 @@ append_mariadb_vars() {
 
 append_deploy_paths() {
     set_env_var "$ENV_FILE" "PASARGUARDBOT_CONFIG_DIR" "$CONFIG_DIR"
-    set_env_var "$ENV_FILE" "PASARGUARDBOT_SOURCE_DIR" "$SOURCE_DIR"
 }
 
 generate_env_file() {
     local api_id api_hash bot_token admin_id
     local db_pass db_root_pass webhook_secret crypto_key
-    local example="${SOURCE_DIR}/.env.example"
-
-    [[ -f "$example" ]] || die ".env.example not found in ${SOURCE_DIR}"
+    local tmp
 
     if [[ -f "$ENV_FILE" ]]; then
         warn ".env already exists — keeping the existing file."
+        chmod 600 "$ENV_FILE" 2>/dev/null || true
         return 0
+    fi
+
+    ensure_config_dirs
+
+    tmp="$(mktemp)"
+    info "Downloading .env.example from GitHub..."
+    if ! curl_download "$ENV_EXAMPLE_RAW_URL" "$tmp"; then
+        rm -f "$tmp"
+        explain_network_failure "download .env.example"
+        exit 1
+    fi
+    if [[ ! -s "$tmp" ]] || ! grep -q '^API_ID=' "$tmp"; then
+        rm -f "$tmp"
+        die "Downloaded .env.example is empty or invalid."
     fi
 
     echo
@@ -363,10 +814,9 @@ generate_env_file() {
     webhook_secret="$(rand_hex 16)"
     crypto_key="$(rand_b64 32)"
 
-    mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis}
-    chmod 700 "$CONFIG_DIR"
-
-    cp "$example" "$ENV_FILE"
+    cp "$tmp" "$ENV_FILE"
+    rm -f "$tmp"
+    chmod 600 "$ENV_FILE"
 
     set_env_var "$ENV_FILE" "API_ID" "$api_id"
     set_env_var "$ENV_FILE" "API_HASH" "$api_hash"
@@ -387,121 +837,123 @@ generate_env_file() {
 
     chmod 600 "$ENV_FILE"
 
-    ok ".env created at ${ENV_FILE} (from .env.example)"
+    ok ".env created at ${ENV_FILE}"
     echo
-    info "Database credentials (appended to .env):"
+    info "Database credentials (saved in .env):"
     echo -e "  ${C_DIM}Database:${C_RESET} pasarguardbot"
     echo -e "  ${C_DIM}User:${C_RESET}     pasarguardbot"
     echo -e "  ${C_DIM}Password:${C_RESET} ${db_pass}"
     echo -e "  ${C_DIM}Root:${C_RESET}     ${db_root_pass}"
 }
 
-# ── Clone & compose ───────────────────────────────────────────────────────────
-resolve_latest_tag() {
-    local tag
-    tag="$(
-        git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
-            | sed 's/.*refs\/tags\///' \
-            | grep -v '\^{}$' \
-            | sort -V \
-            | tail -1
-    )"
-    [[ -n "$tag" ]] || die "No release tags found on ${REPO_URL}. Create a tag on GitHub first (e.g. 1.0.0)."
-    printf '%s' "$tag"
-}
+# ── Compose download & validation ──────────────────────────────────────────────
+validate_compose_file() {
+    local file="$1"
 
-get_current_tag() {
-    git -C "$SOURCE_DIR" describe --tags --exact-match HEAD 2>/dev/null \
-        || git -C "$SOURCE_DIR" tag --points-at HEAD 2>/dev/null | head -1 \
-        || true
-}
-
-checkout_release_tag() {
-    local latest="$1"
-    local current
-    local latest_label
-
-    latest_label="$(format_version "$latest")"
-    current="$(get_current_tag)"
-    if [[ "$current" == "$latest" ]]; then
-        ok "Already on release ${latest_label}"
-        return 0
+    [[ -s "$file" ]] || {
+        err "Compose file is empty."
+        return 1
+    }
+    grep -q 'ghcr.io/amirkenzo/pasarguardbot:latest' "$file" || {
+        err "Compose file missing required image ghcr.io/amirkenzo/pasarguardbot:latest"
+        return 1
+    }
+    if grep -E '^\s+build:' "$file" >/dev/null 2>&1; then
+        err "Production Compose must not contain build: for services."
+        return 1
     fi
-
-    info "Checking out release ${latest_label}..."
-    git -C "$SOURCE_DIR" fetch --tags --prune origin
-    if git -C "$SOURCE_DIR" checkout --force "$latest" 2>/dev/null; then
-        ok "Source at ${latest_label}"
-        return 0
-    fi
-
-    warn "Could not switch to ${latest_label} — re-cloning..."
-    rm -rf "$SOURCE_DIR"
-    git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
-    ok "Source cloned at ${latest_label}"
-}
-
-clone_source() {
-    local latest latest_label
-    latest="$(resolve_latest_tag)"
-    latest_label="$(format_version "$latest")"
-
-    if [[ -d "$SOURCE_DIR/.git" ]]; then
-        info "Source already cloned — syncing to latest release tag..."
-        checkout_release_tag "$latest"
-    else
-        info "Cloning release ${latest_label} from GitHub → ${SOURCE_DIR}"
-        mkdir -p "$(dirname "$SOURCE_DIR")"
-        git clone --depth 1 --branch "$latest" "$REPO_URL" "$SOURCE_DIR"
-        ok "Source cloned at ${latest_label}"
-    fi
-    ok "Source ready: ${SOURCE_DIR} (${latest_label})"
+    return 0
 }
 
 setup_compose() {
     local tmp
 
-    mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis}
-
-    # Always fetch the latest compose from GitHub main so install/update
-    # does not keep an old local image name like pasarguardbot:latest.
+    ensure_config_dirs
     tmp="$(mktemp)"
-    info "Downloading latest docker-compose.yml from GitHub..."
-    curl -fsSL --max-time 30 "$COMPOSE_RAW_URL" -o "$tmp" || {
+
+    info "Downloading production docker-compose.yml from GitHub..."
+    if ! curl_download "$COMPOSE_RAW_URL" "$tmp"; then
         rm -f "$tmp"
-        die "Failed to download docker-compose.yml from GitHub."
-    }
-    grep -q 'ghcr.io/amirkenzo/pasarguardbot:latest' "$tmp" || {
+        explain_network_failure "download docker-compose.yml"
+        exit 1
+    fi
+
+    if ! validate_compose_file "$tmp"; then
         rm -f "$tmp"
-        die "Downloaded docker-compose.yml is invalid (missing GHCR bot image)."
-    }
+        die "Downloaded docker-compose.yml failed validation."
+    fi
+
+    # Validate with docker compose config when .env exists (or create a stub for config check).
+    if [[ -f "$ENV_FILE" ]]; then
+        if ! docker compose --project-directory "$CONFIG_DIR" -f "$tmp" --env-file "$ENV_FILE" config >/dev/null; then
+            rm -f "$tmp"
+            die "docker compose config failed for downloaded Compose file (invalid YAML or references)."
+        fi
+    fi
 
     cp "$tmp" "$COMPOSE_FILE"
     rm -f "$tmp"
     ok "docker-compose.yml updated at ${COMPOSE_FILE}"
 }
 
-pull_bot_image() {
-    info "Pulling bot image ${BOT_IMAGE}:latest..."
-    docker pull "${BOT_IMAGE}:latest"
-    ok "Image ready: ${BOT_IMAGE}:latest"
+pull_images() {
+    info "Pulling Docker images..."
+    if ! docker_compose pull; then
+        err "Failed to pull one or more images."
+        err "If the bot image fails: check GHCR availability and that your CPU architecture is supported (amd64/arm64)."
+        die "docker compose pull failed."
+    fi
+    ok "Images pulled."
 }
 
-cleanup_stale_resources() {
+wait_for_containers_healthy() {
+    local i=0
+    local max=90
+    local bot_state
+
+    info "Waiting for containers..."
+    while (( i < max )); do
+        bot_state="$(get_container_state pasarguardbot)"
+        if [[ "$bot_state" == "running" ]]; then
+            ok "Bot container is running."
+            return 0
+        fi
+        sleep 2
+        i=$((i + 2))
+    done
+
+    warn "Timed out waiting for bot container. Current status:"
+    docker_compose ps || true
+    return 1
+}
+
+cleanup_stale_named_containers() {
+    # Only remove known PasarguardBot container names (not unrelated resources).
     docker rm -f pasarguardbot-redis pasarguardbot-mariadb pasarguardbot-phpmyadmin pasarguardbot 2>/dev/null || true
-    docker volume rm pasarguardbot_mariadb_data pasarguardbot_redis_data 2>/dev/null || true
-    docker network rm pasarguardbot_default 2>/dev/null || true
+}
+
+prune_dangling_images_safe() {
+    # Only dangling images; never prune volumes or running containers.
+    docker image prune -f >/dev/null 2>&1 || true
 }
 
 install_manager_command() {
     local tmp
     tmp="$(mktemp)"
 
-    info "Installing latest manager script from GitHub main..."
-    curl -fsSL --max-time 30 "$SCRIPT_RAW_URL" -o "$tmp" || {
+    info "Installing manager script from GitHub..."
+    if ! curl_download "$SCRIPT_RAW_URL" "$tmp"; then
         rm -f "$tmp"
-        die "Failed to download manager script from GitHub."
-    }
+        # Fallback: if we are already running a local copy, install that.
+        if [[ -f "${BASH_SOURCE[0]:-}" && -s "${BASH_SOURCE[0]}" ]]; then
+            warn "Could not download manager script; installing the running copy."
+            cp "${BASH_SOURCE[0]}" "$tmp"
+        else
+            explain_network_failure "download manager script"
+            exit 1
+        fi
+    fi
+
     head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || {
         rm -f "$tmp"
         die "Downloaded manager script is invalid."
@@ -512,7 +964,7 @@ install_manager_command() {
     rm -f "$tmp"
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
-    ok "pasarguardbot command installed from GitHub and registered in PATH."
+    ok "pasarguardbot command installed at ${MANAGER_BIN}"
 }
 
 # ── Actions ───────────────────────────────────────────────────────────────────
@@ -522,34 +974,40 @@ action_install() {
     echo
 
     if is_installed; then
-        warn "Bot is already installed."
-        read -r -p "Continue anyway? (y/N): " confirm
+        warn "Bot appears already installed (${CONFIG_DIR})."
+        read -r -p "Continue (will keep existing .env and data)? (y/N): " confirm || true
         [[ "${confirm,,}" == "y" ]] || return 0
     fi
 
-    install_prerequisites
-    clone_source
+    check_disk_space
+    install_docker
+    check_required_ports
+    ensure_config_dirs
     generate_env_file
     setup_compose
     install_manager_command
-    cleanup_stale_resources
+    cleanup_stale_named_containers
 
-    pull_bot_image
+    pull_images
 
     info "Starting services..."
-    docker_compose up -d
+    if ! docker_compose up -d; then
+        die "docker compose up failed. Check logs with: docker compose -f ${COMPOSE_FILE} logs"
+    fi
+
+    wait_for_containers_healthy || true
 
     echo
     ok "Installation completed successfully!"
     echo
     info "Paths:"
-    echo -e "  ${C_DIM}Bot .env:${C_RESET}    ${ENV_FILE}"
-    echo -e "  ${C_DIM}Source:${C_RESET}         ${SOURCE_DIR}"
-    echo -e "  ${C_DIM}Logs:${C_RESET}           ${CONFIG_DIR}/logs"
-    echo -e "  ${C_DIM}Data:${C_RESET}           ${CONFIG_DIR}/data"
+    echo -e "  ${C_DIM}Config:${C_RESET}  ${CONFIG_DIR}"
+    echo -e "  ${C_DIM}.env:${C_RESET}    ${ENV_FILE}"
+    echo -e "  ${C_DIM}Logs:${C_RESET}    ${CONFIG_DIR}/logs"
+    echo -e "  ${C_DIM}Data:${C_RESET}    ${CONFIG_DIR}/data"
     echo
     info "Image:"
-    echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:latest"
+    echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:${BOT_IMAGE_TAG} ($(get_installed_bot_version))"
     echo
     info "Ports:"
     echo -e "  ${C_DIM}FastAPI:${C_RESET}      6160 (public)"
@@ -566,7 +1024,7 @@ action_install() {
 
 action_uninstall() {
     draw_banner
-    if ! is_installed; then
+    if ! is_installed && [[ ! -d "$CONFIG_DIR" ]]; then
         warn "Bot is not installed."
         pause
         return 0
@@ -574,37 +1032,56 @@ action_uninstall() {
 
     echo -e "${C_RED}${C_BOLD}  ⚠  Uninstall PasarguardBot${C_RESET}"
     echo
-    echo "  1) Remove containers only (database and redis data are kept)"
-    echo "  2) Full remove + delete database and redis data"
-    echo "  3) Full remove + delete all files (${CONFIG_DIR} and ${SOURCE_DIR})"
+    echo "  1) Remove containers only (keep .env and data)"
+    echo "  2) Remove containers + data (keep .env / config if present)"
+    echo "  3) Full remove (${CONFIG_DIR} and ${MANAGER_BIN})"
     echo "  0) Cancel"
     echo
-    read -r -p "Choice: " choice
+    read -r -p "Choice: " choice || true
 
     case "$choice" in
         1)
             info "Stopping and removing containers..."
-            docker_compose down --remove-orphans 2>/dev/null || true
-            ok "Containers removed. Data and .env were kept."
+            if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
+                docker_compose down --remove-orphans 2>/dev/null || true
+            else
+                cleanup_stale_named_containers
+            fi
+            ok "Containers removed. .env and data were kept."
             ;;
         2)
-            read -r -p "Are you sure? Database and redis data will be deleted (y/N): " confirm
-            [[ "${confirm,,}" == "y" ]] || return 0
-            docker_compose down --remove-orphans 2>/dev/null || true
+            read -r -p "Delete database/redis data under ${CONFIG_DIR}/data? Type 'yes' to confirm: " confirm || true
+            [[ "$confirm" == "yes" ]] || {
+                info "Cancelled."
+                pause
+                return 0
+            }
+            if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
+                docker_compose down --remove-orphans 2>/dev/null || true
+            else
+                cleanup_stale_named_containers
+            fi
             rm -rf "${CONFIG_DIR}/data"
-            docker rmi "${BOT_IMAGE}:latest" 2>/dev/null || true
-            ok "Containers removed and data directory deleted."
+            ok "Containers and data removed. Config/.env kept if present."
             ;;
         3)
-            read -r -p "Everything will be deleted! Type 'yes' to confirm: " confirm
-            [[ "$confirm" == "yes" ]] || return 0
-            docker_compose down --remove-orphans 2>/dev/null || true
+            read -r -p "Everything under ${CONFIG_DIR} will be deleted! Type 'yes' to confirm: " confirm || true
+            [[ "$confirm" == "yes" ]] || {
+                info "Cancelled."
+                pause
+                return 0
+            }
+            if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
+                docker_compose down --remove-orphans 2>/dev/null || true
+            else
+                cleanup_stale_named_containers
+            fi
             while IFS= read -r img_id; do
                 [[ -n "$img_id" ]] && docker rmi "$img_id" 2>/dev/null || true
-            done < <(docker images "${BOT_IMAGE}" -q 2>/dev/null)
-            rm -rf "$CONFIG_DIR" "$SOURCE_DIR"
+            done < <(docker images "${BOT_IMAGE}" -q 2>/dev/null || true)
+            rm -rf "$CONFIG_DIR"
             rm -f "$MANAGER_BIN"
-            ok "All files removed."
+            ok "All PasarguardBot files removed."
             ;;
         *)
             info "Cancelled."
@@ -614,25 +1091,29 @@ action_uninstall() {
 }
 
 action_update() {
+    local old_ver new_ver
+
     draw_banner
     is_installed || die "Install the bot first (option 1)."
+    command -v docker &>/dev/null || die "Docker is not installed."
+    docker info &>/dev/null || die "Docker daemon is not running."
 
-    info "Checking for a newer release tag on GitHub..."
-    local old_tag new_tag latest
-    old_tag="$(get_current_tag)"
-    old_tag="${old_tag:-unknown}"
-    latest="$(resolve_latest_tag)"
-    checkout_release_tag "$latest"
-    new_tag="$(get_current_tag)"
-    new_tag="${new_tag:-$latest}"
+    old_ver="$(get_installed_bot_version)"
 
+    info "Updating production Compose and pulling latest images..."
     setup_compose
-    pull_bot_image
+    pull_images
 
-    info "Restarting services with the new image..."
-    docker_compose up -d --force-recreate --pull always
+    info "Recreating containers..."
+    if ! docker_compose up -d --force-recreate --remove-orphans; then
+        die "Update failed during docker compose up."
+    fi
 
-    ok "Update complete ($(format_version "$old_tag") → $(format_version "$new_tag"))."
+    wait_for_containers_healthy || true
+    prune_dangling_images_safe
+
+    new_ver="$(get_installed_bot_version)"
+    ok "Update complete (${old_ver} → ${new_ver})."
     pause
 }
 
@@ -641,21 +1122,30 @@ action_update_script() {
 
     local tmp new_ver old_ver
     tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' RETURN
 
     info "Downloading latest manager script from GitHub..."
-    curl -fsSL --max-time 30 "$SCRIPT_RAW_URL" -o "$tmp" || die "Failed to download manager script."
+    if ! curl_download "$SCRIPT_RAW_URL" "$tmp"; then
+        rm -f "$tmp"
+        explain_network_failure "download manager script"
+        pause
+        return 1
+    fi
 
-    head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || die "Downloaded file does not look like a valid script."
+    head -1 "$tmp" | grep -q '#!/usr/bin/env bash' || {
+        rm -f "$tmp"
+        die "Downloaded file does not look like a valid script."
+    }
 
     new_ver="$(grep -m1 '^readonly SCRIPT_VERSION=' "$tmp" | sed -E 's/^readonly SCRIPT_VERSION="(.*)"/\1/')"
     old_ver="$SCRIPT_VERSION"
 
     if [[ -z "$new_ver" ]]; then
+        rm -f "$tmp"
         die "Could not read SCRIPT_VERSION from downloaded script."
     fi
 
     if [[ "$new_ver" == "$old_ver" ]]; then
+        rm -f "$tmp"
         ok "Manager script is already up to date ($(format_version "$old_ver"))."
         pause
         return 0
@@ -663,6 +1153,7 @@ action_update_script() {
 
     mkdir -p "$CONFIG_DIR"
     cp "$tmp" "$MANAGER_SCRIPT"
+    rm -f "$tmp"
     chmod +x "$MANAGER_SCRIPT"
     ln -sf "$MANAGER_SCRIPT" "$MANAGER_BIN"
 
@@ -682,7 +1173,7 @@ action_logs() {
     echo "  5) Live bot logs (Ctrl+C to exit)"
     echo "  0) Back"
     echo
-    read -r -p "Choice: " choice
+    read -r -p "Choice: " choice || true
 
     case "$choice" in
         1) docker_compose logs --tail=200 bot ;;
@@ -711,7 +1202,7 @@ action_edit_env() {
     "$editor" "$ENV_FILE"
 
     echo
-    read -r -p "Restart the bot? (Y/n): " restart
+    read -r -p "Restart the bot? (Y/n): " restart || true
     if [[ "${restart,,}" != "n" ]]; then
         action_restart_quiet
     fi
@@ -761,7 +1252,7 @@ action_urls() {
 main_menu() {
     while true; do
         draw_menu
-        read -r -p "  Select an option: " choice
+        read -r -p "  Select an option: " choice || exit 0
         case "$choice" in
             1) action_install ;;
             2) action_uninstall ;;
@@ -778,16 +1269,18 @@ main_menu() {
     done
 }
 
+bootstrap "$@"
+
 case "${1:-}" in
-    install)   require_root; action_install ;;
-    uninstall) require_root; action_uninstall ;;
-    update)         require_root; action_update ;;
-    update-script)  require_root; action_update_script ;;
-    logs)           require_root; action_logs ;;
-    restart)        require_root; action_restart ;;
-    status)         require_root; action_status ;;
-    urls)           require_root; action_urls ;;
-    ""|menu)        require_root; main_menu ;;
+    install)        action_install ;;
+    uninstall)      action_uninstall ;;
+    update)         action_update ;;
+    update-script)  action_update_script ;;
+    logs)           action_logs ;;
+    restart)        action_restart ;;
+    status)         action_status ;;
+    urls)           action_urls ;;
+    ""|menu)        main_menu ;;
     *)
         echo "Usage: pasarguardbot [install|uninstall|update|update-script|logs|restart|status|urls|menu]"
         exit 1
