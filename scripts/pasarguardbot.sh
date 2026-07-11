@@ -186,16 +186,16 @@ show_install_info() {
 
     echo -e "  ${C_DIM}Manager script:${C_RESET}  $(format_version "$SCRIPT_VERSION")"
 
-    remote_script_ver="$(get_remote_script_version)"
+    remote_script_ver="$(get_remote_script_version)" || remote_script_ver=""
     if [[ -n "$remote_script_ver" && "$remote_script_ver" != "$SCRIPT_VERSION" ]]; then
         echo -e "  ${C_DIM}Script latest:${C_RESET}   $(format_version "$remote_script_ver") ${C_YELLOW}(update available)${C_RESET}"
     fi
 
     if is_installed; then
-        installed_ver="$(get_installed_bot_version)"
-        latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
+        installed_ver="$(get_installed_bot_version)" || installed_ver="—"
+        latest_tag="$(resolve_latest_tag 2>/dev/null)" || latest_tag=""
         latest_ver="$(format_version "$latest_tag")"
-        bot_runtime="$(get_bot_runtime_summary)"
+        bot_runtime="$(get_bot_runtime_summary)" || bot_runtime="—"
         fastapi_port="$(get_env_value "FASTAPI_PORT")"
         fastapi_port="${fastapi_port:-6160}"
 
@@ -210,7 +210,7 @@ show_install_info() {
         echo -e "  ${C_DIM}Config:${C_RESET}          ${CONFIG_DIR}"
         echo -e "  ${C_DIM}Source:${C_RESET}          ${SOURCE_DIR}"
     else
-        latest_tag="$(resolve_latest_tag 2>/dev/null || true)"
+        latest_tag="$(resolve_latest_tag 2>/dev/null)" || latest_tag=""
         [[ -n "$latest_tag" ]] && echo -e "  ${C_DIM}Latest release:${C_RESET}  $(format_version "$latest_tag")"
     fi
     echo
