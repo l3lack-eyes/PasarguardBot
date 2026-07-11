@@ -1,7 +1,7 @@
 # PasarguardBot
 
-[![Python](https://img.shields.io/badge/Python-3.14-blue?logo=python&logoColor=white)](https://www.python.org/) 
-[![License](https://img.shields.io/badge/License-AGPL--3.0-green)](LICENSE)  
+[![Python](https://img.shields.io/badge/Python-3.14-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-green)](LICENSE)
 [![Telethon](https://img.shields.io/badge/Telethon-1.44+-0088cc?logo=telegram)](https://github.com/LonamiWebs/Telethon)
 
 ---
@@ -30,6 +30,7 @@
 ---
 
 ## نصب سریع (لینوکس)
+## نصب
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh)
@@ -37,44 +38,19 @@ bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main
 
 بعد از نصب: `pasarguardbot`
 
-| مسیر | توضیح |
-|------|--------|
-| `/opt/pasarguardbot` | `.env`، لاگ‌ها، session، docker-compose |
-| `/var/lib/pasarguardbot` | سورس کلون‌شده |
-
----
-
-## توسعه محلی
-
-```bash
-git clone https://github.com/AmirKenzo/PasarguardBot.git
-cd PasarguardBot
-cp .env.example .env
-docker compose up -d --build
-```
-
-بدون Docker:
-
-```bash
-uv sync
-cp .env.example .env
-uv run alembic upgrade head
-uv run main.py
-```
-
 ---
 
 ## پیکربندی
 
 | متغیر | توضیح |
 |-------|--------|
-| `API_ID` / `API_HASH` | [my.telegram.org](https://my.telegram.org/apps) |
+| `API_ID` / `API_HASH` | اختیاری — اگر خالی بماند، مقادیر پیش‌فرض ست می‌شود |
 | `BOT_TOKEN` | [@BotFather](https://t.me/BotFather) |
-| `ADMIN_ID` | آیدی عددی ادمین‌ها |
-| `SQLALCHEMY_DATABASE_URL` | MariaDB / MySQL |
+| `ADMIN_ID` | آیدی عددی ادمین‌ها (با کاما جدا کنید) |
+| `SQLALCHEMY_DATABASE_URL` | در نصب Docker به‌صورت خودکار ست می‌شود |
 | `CRYPTO_KEY` | کلید رمزنگاری |
-| `REDIS_URL` | Redis |
-| `FASTAPI_PORT` | پورت API (خالی = غیرفعال) |
+| `REDIS_URL` | در نصب Docker به‌صورت خودکار ست می‌شود |
+| `FASTAPI_PORT` | پورت API (پیش‌فرض `6160`) |
 | `WEBHOOK_SECRET` | سکرت وب‌هوک پنل |
 
 جزئیات کامل: [`.env.example`](.env.example)
