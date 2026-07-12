@@ -119,7 +119,7 @@ async def apply_panel_user_renewal(
             data_limit=new_hajm,
             expire=day_to_timestamp(int(plan.duration)),
             data_limit_reset_strategy=reset_strategy,
-            ip_limit=ip_limit,
+            hwid_limit=ip_limit if ip_limit > 0 else 0,
         ),
         token=panel.cookie,
     )

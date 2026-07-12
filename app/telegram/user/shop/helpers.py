@@ -379,6 +379,7 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
         reset_strategy = UserDataLimitResetStrategy(plan.data_limit_reset_strategy)
 
     start_time = time.time()
+    ip_limit = getattr(plan, "ip_limit", 0) or 0
     new_user = UserCreate(
         username=username,
         group_ids=group_ids,
@@ -386,6 +387,7 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
         expire=day_to_timestamp(int(plan.duration)),
         note=f"{event.sender_id}",
         data_limit_reset_strategy=reset_strategy,
+        hwid_limit=ip_limit if ip_limit > 0 else None,
     )
     try:
         added_user = await PasarguardAPI(panel.base_url).add_user(user=new_user, token=panel.cookie)
