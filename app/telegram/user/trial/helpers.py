@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from app.services.panels.auth import PanelGroupsResponse
-
 from app.db.crud.user import UserCRUD
+from app.services.panels.auth import PanelGroupsResponse
 from app.services.panels.settings import panel_default_group_ids
 
 BOT_LANGUAGE = "fa"

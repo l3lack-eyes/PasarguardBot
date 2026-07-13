@@ -17,7 +17,7 @@ from app.db.crud.user import UserCRUD, safe_mode_admin_label, user_safe_mode_val
 from app.logger import LogType, get_logger
 from app.services.billing.renewal import require_panel_userid
 from app.services.billing.reseller_renewal import renew_reseller_account
-from app.services.panels.admins import get_reseller_admin, list_reseller_admin_users, reset_reseller_admin_password
+from app.services.panels.admins import get_reseller_admin_user_count, reset_reseller_admin_password
 from app.services.reseller.logging import send_reseller_log
 from app.services.users.admin_profile import display_user_info_admin
 from app.telegram.admin.manage_user import states
@@ -139,15 +139,9 @@ async def handle_admin_reseller_callbacks(event: events.CallbackQuery.Event, dat
         sub_users = 0
         if panel:
             try:
-                users = await list_reseller_admin_users(
-                    panel,
-                    admin_id=account.panel_admin_id,
-                    admin_username=account.username,
-                )
-                sub_users = len(users)
+                sub_users = await get_reseller_admin_user_count(panel, account.username)
             except Exception:
-                admin = await get_reseller_admin(panel, account.username)
-                sub_users = int(getattr(admin, "total_users", 0) or 0) if admin else 0
+                sub_users = 0
         await event.edit(
             f"**⚠️ حذف نمایندگی `{account.username}`**\n\n"
             f"• ادمین پنل حذف می‌شود\n"

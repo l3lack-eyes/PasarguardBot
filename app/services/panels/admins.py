@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import string
 from typing import Any
@@ -221,52 +222,36 @@ async def reset_reseller_admin_password(panel, username: str) -> str:
     return password
 
 
-def _user_belongs_to_admin(user, *, admin_id: int | None, admin_username: str) -> bool:
-    admin = getattr(user, "admin", None)
-    if not admin:
-        return False
-    if admin_id and getattr(admin, "id", None) == admin_id:
-        return True
-    return bool(admin_username and getattr(admin, "username", None) == admin_username)
+_REMOVED_USERS_DETAIL = re.compile(r"done (\d+) users deleted", re.IGNORECASE)
 
 
-async def list_reseller_admin_users(panel, *, admin_id: int | None, admin_username: str) -> list:
-    async def _list(api: PasarguardAPI, token: str):
-        matched = []
-        offset = 0
-        limit = 200
-        while True:
-            resp = await api.get_users(token=token, offset=offset, limit=limit)
-            users = getattr(resp, "users", None) or []
-            if not users:
-                break
-            for user in users:
-                if _user_belongs_to_admin(user, admin_id=admin_id, admin_username=admin_username):
-                    matched.append(user)
-            total = int(getattr(resp, "total", 0) or 0)
-            offset += limit
-            if offset >= total or len(users) < limit:
-                break
-        return matched
+def _parse_removed_users_count(result: Any) -> int:
+    if isinstance(result, dict):
+        match = _REMOVED_USERS_DETAIL.search(str(result.get("detail") or ""))
+        if match:
+            return int(match.group(1))
+    return 0
 
-    return await _with_auth_retry(panel, _list)
+
+async def get_reseller_admin_user_count(panel, admin_username: str) -> int:
+    username = (admin_username or "").strip()
+    if not username:
+        return 0
+    admin = await get_reseller_admin(panel, username)
+    return int(getattr(admin, "total_users", 0) or 0) if admin else 0
 
 
 async def delete_reseller_admin_users(panel, *, admin_id: int | None, admin_username: str) -> int:
-    from pasarguard import BulkUsersSelection
-
-    users = await list_reseller_admin_users(panel, admin_id=admin_id, admin_username=admin_username)
-    user_ids = [int(u.id) for u in users if getattr(u, "id", None)]
-    if not user_ids:
+    username = (admin_username or "").strip()
+    if not admin_id and not username:
         return 0
 
     async def _delete(api: PasarguardAPI, token: str):
-        deleted = 0
-        for offset in range(0, len(user_ids), 100):
-            chunk = user_ids[offset : offset + 100]
-            await api.bulk_delete_users(BulkUsersSelection(ids=chunk), token=token)
-            deleted += len(chunk)
-        return deleted
+        if admin_id:
+            result = await api.remove_all_users_by_id(admin_id=admin_id, token=token)
+        else:
+            result = await api.remove_all_users_by_username(username=username, token=token)
+        return _parse_removed_users_count(result)
 
     return await _with_auth_retry(panel, _delete)
 

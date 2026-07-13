@@ -23,8 +23,7 @@ from app.services.billing.reseller_pricing import (
 from app.services.billing.reseller_renewal import renew_reseller_account
 from app.services.panels.admins import (
     admin_username_exists,
-    get_reseller_admin,
-    list_reseller_admin_users,
+    get_reseller_admin_user_count,
     reset_reseller_admin_password,
 )
 from app.services.panels.settings import panel_reseller_sale_enabled
@@ -361,15 +360,9 @@ async def reseller_buy_callback(event: events.CallbackQuery.Event):
         sub_users = 0
         if panel:
             try:
-                users = await list_reseller_admin_users(
-                    panel,
-                    admin_id=acc.panel_admin_id,
-                    admin_username=acc.username,
-                )
-                sub_users = len(users)
+                sub_users = await get_reseller_admin_user_count(panel, acc.username)
             except Exception:
-                admin = await get_reseller_admin(panel, acc.username)
-                sub_users = int(getattr(admin, "total_users", 0) or 0) if admin else 0
+                sub_users = 0
         await event.edit(
             f"**⚠️ حذف کامل نمایندگی `{acc.username}`**\n\n"
             f"• ادمین پنل حذف می‌شود\n"
