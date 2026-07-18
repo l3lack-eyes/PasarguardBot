@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.12"
+readonly SCRIPT_VERSION="1.2.13"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1995,6 +1995,29 @@ install_uv_binary() {
     ok "uv installed."
 }
 
+# Force local APP_DIR git tree to match remote branch (drops dirty tracked files).
+# Needed because MariaDB/uv may leave local edits that block plain `git checkout`.
+git_sync_app_dir_to_branch() {
+    local branch="$1" target_ref=""
+    git -C "$APP_DIR" remote set-url origin "$REPO_GIT_URL" 2>/dev/null || true
+    git -C "$APP_DIR" fetch --depth 1 origin "$branch" \
+        || die "git fetch origin ${branch} failed."
+
+    # Shallow fetch may only update FETCH_HEAD (origin/<branch> can be missing).
+    if git -C "$APP_DIR" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
+        target_ref="origin/${branch}"
+    else
+        target_ref="FETCH_HEAD"
+    fi
+
+    git -C "$APP_DIR" reset --hard HEAD >/dev/null 2>&1 || true
+    git -C "$APP_DIR" clean -fd >/dev/null 2>&1 || true
+    git -C "$APP_DIR" checkout -f -B "$branch" "$target_ref" \
+        || die "git checkout ${branch} failed."
+    git -C "$APP_DIR" reset --hard "$target_ref" \
+        || die "git reset --hard ${target_ref} failed."
+}
+
 fetch_bot_source() {
     local tmp tmpdir force_refresh="${1:-0}" branch="${2:-}" extracted="" archive_url
     if [[ -z "$branch" ]]; then
@@ -2005,15 +2028,7 @@ fetch_bot_source() {
 
     if [[ "$force_refresh" == "1" ]] && [[ -d "${APP_DIR}/.git" ]]; then
         info "Updating existing git checkout in ${APP_DIR} (branch ${branch})..."
-        git -C "$APP_DIR" remote set-url origin "$REPO_GIT_URL" 2>/dev/null || true
-        git -C "$APP_DIR" fetch --depth 1 origin "$branch" \
-            || die "git fetch origin ${branch} failed."
-        # Shallow fetch may only update FETCH_HEAD (origin/<branch> can be missing).
-        if git -C "$APP_DIR" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
-            git -C "$APP_DIR" checkout -B "$branch" "origin/${branch}"
-        else
-            git -C "$APP_DIR" checkout -B "$branch" FETCH_HEAD
-        fi
+        git_sync_app_dir_to_branch "$branch"
         set_install_branch "$branch"
         ok "Source updated ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))."
         return 0
@@ -2048,14 +2063,7 @@ fetch_bot_source() {
 
     if [[ -d "${APP_DIR}/.git" ]]; then
         info "Updating existing git checkout in ${APP_DIR} (branch ${branch})..."
-        git -C "$APP_DIR" remote set-url origin "$REPO_GIT_URL" 2>/dev/null || true
-        git -C "$APP_DIR" fetch --depth 1 origin "$branch" \
-            || die "git fetch origin ${branch} failed."
-        if git -C "$APP_DIR" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
-            git -C "$APP_DIR" checkout -B "$branch" "origin/${branch}"
-        else
-            git -C "$APP_DIR" checkout -B "$branch" FETCH_HEAD
-        fi
+        git_sync_app_dir_to_branch "$branch"
         set_install_branch "$branch"
         ok "Source updated ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))."
         return 0
@@ -2538,6 +2546,10 @@ action_update_native() {
     fetch_bot_source 1 "$branch"
     link_native_app_paths
     sync_native_python_deps
+    if [[ -f "${APP_DIR}/scripts/pasarguardbot.sh" ]]; then
+        info "Refreshing manager script from updated source..."
+        install_manager_from_file "${APP_DIR}/scripts/pasarguardbot.sh"
+    fi
     write_native_systemd_units
 
     info "Restarting native services..."
@@ -2577,11 +2589,13 @@ action_update() {
 action_update_script() {
     draw_banner
 
-    local tmp new_ver old_ver
+    local tmp new_ver old_ver branch script_url
     tmp="$(mktemp)"
+    branch="$(get_repo_branch)"
+    script_url="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${branch}/scripts/pasarguardbot.sh"
 
-    info "Downloading latest manager script from GitHub..."
-    if ! curl_download "$SCRIPT_RAW_URL" "$tmp"; then
+    info "Downloading latest manager script from GitHub (branch ${branch})..."
+    if ! curl_download "$script_url" "$tmp"; then
         rm -f "$tmp"
         explain_network_failure "download manager script"
         pause
