@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.13"
+readonly SCRIPT_VERSION="1.2.14"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -32,7 +32,6 @@ readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/Pasarg
 readonly REPO_GIT_URL="https://github.com/AmirKenzo/PasarguardBot.git"
 readonly PHPMYADMIN_ARCHIVE_URL="https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
-readonly BOT_IMAGE_TAG="latest"
 readonly FASTAPI_PORT_DEFAULT=6160
 readonly REDIS_PORT=6161
 readonly MARIADB_PORT=6162
@@ -200,6 +199,35 @@ set_install_branch() {
     local branch="$1"
     mkdir -p "$CONFIG_DIR"
     printf '%s\n' "$branch" >"$INSTALL_BRANCH_FILE"
+}
+
+# GHCR tags: main → latest (release tags), other branches → branch name (e.g. dev).
+bot_image_tag_for_branch() {
+    local branch="${1:-main}"
+    case "$branch" in
+        main) printf '%s' 'latest' ;;
+        *) printf '%s' "$branch" ;;
+    esac
+}
+
+get_bot_image_tag() {
+    local tag=""
+    if [[ -f "$ENV_FILE" ]]; then
+        tag="$(get_env_value PASARGUARDBOT_IMAGE_TAG "$ENV_FILE")"
+    fi
+    if [[ -n "$tag" ]]; then
+        printf '%s' "$tag"
+        return 0
+    fi
+    bot_image_tag_for_branch "$(get_repo_branch)"
+}
+
+apply_bot_image_tag_for_branch() {
+    local branch="${1:-$(get_repo_branch)}"
+    local image_tag
+    image_tag="$(bot_image_tag_for_branch "$branch")"
+    [[ -f "$ENV_FILE" ]] || return 0
+    set_env_var "$ENV_FILE" "PASARGUARDBOT_IMAGE_TAG" "$image_tag"
 }
 
 # Resolve update/install branch: env > saved file > current git branch > default.
@@ -887,33 +915,33 @@ get_installed_bot_version() {
         return 0
     fi
 
-    if ! docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" &>/dev/null; then
+    if ! docker image inspect "${BOT_IMAGE}:$(get_bot_image_tag)" &>/dev/null; then
         printf '%s' '—'
         return 0
     fi
 
-    version="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+    version="$(docker image inspect "${BOT_IMAGE}:$(get_bot_image_tag)" \
         --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null || true)"
     if [[ -n "$version" && "$version" != "<no value>" && "$version" != "null" ]]; then
         format_version "$version"
         return 0
     fi
 
-    revision="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+    revision="$(docker image inspect "${BOT_IMAGE}:$(get_bot_image_tag)" \
         --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
     if [[ -n "$revision" && "$revision" != "<no value>" && "$revision" != "null" ]]; then
         printf 'sha-%s' "${revision:0:7}"
         return 0
     fi
 
-    digest="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+    digest="$(docker image inspect "${BOT_IMAGE}:$(get_bot_image_tag)" \
         --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
     if [[ -n "$digest" && "$digest" == *"@"* ]]; then
         printf '%s' "${digest##*@}"
         return 0
     fi
 
-    short_id="$(docker image inspect "${BOT_IMAGE}:${BOT_IMAGE_TAG}" \
+    short_id="$(docker image inspect "${BOT_IMAGE}:$(get_bot_image_tag)" \
         --format '{{.Id}}' 2>/dev/null | sed 's/^sha256://' | cut -c1-12 || true)"
     if [[ -n "$short_id" ]]; then
         printf '%s' "$short_id"
@@ -1171,6 +1199,7 @@ generate_env_file() {
     set_env_var "$ENV_FILE" "LOG_DIR" "./logs"
     set_env_var "$ENV_FILE" "LOG_TO_FILE" "true"
     set_env_var "$ENV_FILE" "LOG_LEVEL" "INFO"
+    set_env_var "$ENV_FILE" "PASARGUARDBOT_IMAGE_TAG" "$(bot_image_tag_for_branch "$branch")"
     append_mariadb_vars "$db_pass" "$db_root_pass"
     append_deploy_paths
     set_install_mode "$install_mode"
@@ -1237,7 +1266,8 @@ setup_compose() {
 
     cp "$tmp" "$COMPOSE_FILE"
     rm -f "$tmp"
-    ok "docker-compose.yml updated at ${COMPOSE_FILE}"
+    apply_bot_image_tag_for_branch "$branch"
+    ok "docker-compose.yml updated at ${COMPOSE_FILE} (image tag: $(bot_image_tag_for_branch "$branch"))"
 }
 
 pull_images() {
@@ -2302,7 +2332,7 @@ action_install_docker() {
     echo -e "  ${C_DIM}Data:${C_RESET}    ${CONFIG_DIR}/data"
     echo
     info "Image:"
-    echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:${BOT_IMAGE_TAG} ($(get_installed_bot_version))"
+    echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:$(get_bot_image_tag) ($(get_installed_bot_version))"
     echo -e "  ${C_DIM}Branch:${C_RESET}  ${branch}"
     echo
     info "Ports:"
@@ -2512,14 +2542,14 @@ action_uninstall() {
 }
 
 action_update_docker() {
-    local old_ver new_ver branch="${1:-main}"
+    local old_ver new_ver branch="${1:-main}" script_url tmp_mgr
     command -v docker &>/dev/null || die "Docker is not installed."
     docker info &>/dev/null || die "Docker daemon is not running."
 
     old_ver="$(get_installed_bot_version)"
     set_install_branch "$branch"
 
-    info "Updating production Compose from branch '${branch}' and pulling latest images..."
+    info "Updating production Compose from branch '${branch}' (image ${BOT_IMAGE}:$(bot_image_tag_for_branch "$branch"))..."
     setup_compose "$branch"
     pull_images
 
@@ -2531,8 +2561,16 @@ action_update_docker() {
     wait_for_containers_healthy || true
     prune_dangling_images_safe
 
+    script_url="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${branch}/scripts/pasarguardbot.sh"
+    tmp_mgr="$(mktemp)"
+    if curl_download "$script_url" "$tmp_mgr"; then
+        info "Refreshing manager script from branch '${branch}'..."
+        install_manager_from_file "$tmp_mgr"
+    fi
+    rm -f "$tmp_mgr"
+
     new_ver="$(get_installed_bot_version)"
-    ok "Update complete (${old_ver} → ${new_ver}) [branch=${branch}]."
+    ok "Update complete (${old_ver} → ${new_ver}) [branch=${branch}, image=$(get_bot_image_tag)]."
 }
 
 action_update_native() {
