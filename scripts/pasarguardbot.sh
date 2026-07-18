@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.5"
+readonly SCRIPT_VERSION="1.2.6"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1820,6 +1820,7 @@ setup_native_mariadb_user() {
     info "Creating PasarguardBot database and user..."
     mariadb_socket_root_check || die "Cannot connect to MariaDB as root via unix socket."
 
+    # Keep root@localhost on unix_socket (OS root). App + phpMyAdmin use password users over TCP.
     mariadb_admin_cli <<SQL
 CREATE DATABASE IF NOT EXISTS pasarguardbot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
@@ -1828,8 +1829,6 @@ ALTER USER 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
 ALTER USER 'pasarguardbot'@'localhost' IDENTIFIED BY '${db_pass}';
 GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'127.0.0.1';
 GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'localhost';
--- Allow root password login over TCP (phpMyAdmin); keep unix_socket for local root.
-ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket OR mysql_native_password BY '${db_root_pass}';
 CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '${db_root_pass}';
 ALTER USER 'root'@'127.0.0.1' IDENTIFIED BY '${db_root_pass}';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
