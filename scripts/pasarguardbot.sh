@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.8"
+readonly SCRIPT_VERSION="1.2.9"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1593,6 +1593,7 @@ install_native_packages() {
     apt-get update -y
     run_pkg_install \
         mariadb-server \
+        mariadb-client \
         redis-server \
         php-cli \
         php-mysqli \
@@ -1728,7 +1729,7 @@ Wants=pasarguardbot-mariadb.service pasarguardbot-redis.service
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin
 EnvironmentFile=-${ENV_FILE}
 ExecStartPre=${uv_bin} run alembic upgrade head
 ExecStart=${uv_bin} run main.py

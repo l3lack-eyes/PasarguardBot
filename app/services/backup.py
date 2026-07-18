@@ -42,9 +42,9 @@ def parse_mysql_url(database_url: str = SQLALCHEMY_DATABASE_URL) -> MysqlConnect
     parsed = urlparse(database_url)
     scheme = (parsed.scheme or "").split("+", 1)[0].lower()
     if scheme not in {"mysql", "mariadb"}:
-        raise ValueError("بکاپ فقط برای MariaDB/MySQL پشتیبانی می‌شود.")
+        raise ValueError("Backup is only supported for MariaDB/MySQL.")
     if not parsed.hostname or not parsed.path or parsed.path == "/":
-        raise ValueError("آدرس دیتابیس نامعتبر است.")
+        raise ValueError("Invalid database URL.")
     return MysqlConnection(
         host=parsed.hostname,
         port=parsed.port or 3306,
@@ -59,21 +59,35 @@ def _resolve_dump_binary() -> str:
         path = shutil.which(name)
         if path:
             return path
-    raise FileNotFoundError("mariadb-dump/mysqldump روی سیستم پیدا نشد.")
+    for path in (
+        "/usr/bin/mariadb-dump",
+        "/usr/bin/mysqldump",
+        "/usr/local/bin/mariadb-dump",
+        "/usr/local/bin/mysqldump",
+    ):
+        if Path(path).is_file() and os.access(path, os.X_OK):
+            return path
+    raise FileNotFoundError(
+        "mariadb-dump/mysqldump not found. On native installs, install the mariadb-client package."
+    )
 
 
 def _write_sql_file(sql_path: Path, data: bytes) -> None:
     sql_path.write_bytes(data)
     if sql_path.stat().st_size == 0:
-        raise RuntimeError("فایل dump دیتابیس خالی است.")
+        raise RuntimeError("Database dump file is empty.")
+
+
+def _default_native_socket() -> Path | None:
+    config_dir = os.environ.get("PASARGUARDBOT_CONFIG_DIR", "/opt/pasarguardbot")
+    sock = Path(config_dir) / "data" / "mariadb" / "pasarguardbot.sock"
+    return sock if sock.is_socket() else None
 
 
 async def _run_mariadb_dump(conn: MysqlConnection, sql_path: Path) -> None:
     dump_bin = _resolve_dump_binary()
     cmd = [
         dump_bin,
-        f"--host={conn.host}",
-        f"--port={conn.port}",
         f"--user={conn.user}",
         "--single-transaction",
         "--routines",
@@ -82,6 +96,19 @@ async def _run_mariadb_dump(conn: MysqlConnection, sql_path: Path) -> None:
         "--databases",
         conn.database,
     ]
+
+    # Prefer unix socket for local native installs (more reliable than TCP auth edge-cases).
+    socket_path = _default_native_socket()
+    if socket_path is not None and conn.host in {"127.0.0.1", "localhost"}:
+        cmd.append(f"--socket={socket_path}")
+    else:
+        cmd.extend(
+            [
+                f"--host={conn.host}",
+                f"--port={conn.port}",
+            ]
+        )
+
     env = os.environ.copy()
     if conn.password:
         env["MYSQL_PWD"] = conn.password
@@ -95,7 +122,7 @@ async def _run_mariadb_dump(conn: MysqlConnection, sql_path: Path) -> None:
     stdout, stderr = await process.communicate()
     if process.returncode != 0:
         err = (stderr or b"").decode("utf-8", errors="replace").strip() or "unknown dump error"
-        raise RuntimeError(f"خطا در dump دیتابیس: {err}")
+        raise RuntimeError(f"Database dump failed: {err}")
     await asyncio.to_thread(_write_sql_file, sql_path, stdout)
 
 
@@ -104,7 +131,14 @@ def _project_root() -> Path:
 
 
 def _env_file_path() -> Path | None:
-    for path in (Path(".env"), _project_root() / ".env", Path("/app/.env")):
+    config_dir = os.environ.get("PASARGUARDBOT_CONFIG_DIR", "/opt/pasarguardbot")
+    candidates = (
+        Path(".env"),
+        _project_root() / ".env",
+        Path(config_dir) / ".env",
+        Path("/app/.env"),
+    )
+    for path in candidates:
         if path.is_file():
             return path
     return None
@@ -162,6 +196,6 @@ async def run_backup_and_send(*, trigger: str = "auto") -> BackupResult:
         )
     except Exception as exc:
         logger.error("%s Backup failed: %s", LogTag.JOB, exc, exc_info=True)
-        return BackupResult(ok=False, message=f"❌ خطا در بکاپ: {exc}", sent=False)
+        return BackupResult(ok=False, message=f"❌ Backup failed: {exc}", sent=False)
     finally:
         await asyncio.to_thread(shutil.rmtree, temp_dir, True)
