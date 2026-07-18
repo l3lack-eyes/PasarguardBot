@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.0"
+readonly SCRIPT_VERSION="1.2.1"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -657,8 +657,91 @@ check_required_ports() {
 
 ensure_config_dirs() {
     mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis,conf,run,app,phpmyadmin}
-    chmod 700 "$CONFIG_DIR"
-    chmod 755 "$RUN_DIR" "$CONF_DIR" 2>/dev/null || true
+    # 755 so service users (mysql) can traverse; secrets stay in .env mode 600.
+    chmod 755 "$CONFIG_DIR"
+    chmod 755 "$RUN_DIR" "$CONF_DIR" "${CONFIG_DIR}/data" 2>/dev/null || true
+    chmod 750 "${CONFIG_DIR}/data/mariadb" "${CONFIG_DIR}/data/redis" 2>/dev/null || true
+    [[ -f "$ENV_FILE" ]] && chmod 600 "$ENV_FILE"
+}
+
+configure_native_mariadb_apparmor() {
+    local profile="" local_file="" marker="# pasarguardbot-native"
+
+    command -v apparmor_parser &>/dev/null || return 0
+
+    if [[ -f /etc/apparmor.d/usr.sbin.mariadbd ]]; then
+        profile="/etc/apparmor.d/usr.sbin.mariadbd"
+        local_file="/etc/apparmor.d/local/usr.sbin.mariadbd"
+    elif [[ -f /etc/apparmor.d/usr.sbin.mysqld ]]; then
+        profile="/etc/apparmor.d/usr.sbin.mysqld"
+        local_file="/etc/apparmor.d/local/usr.sbin.mysqld"
+    else
+        return 0
+    fi
+
+    info "Allowing MariaDB AppArmor access to ${CONFIG_DIR}..."
+    mkdir -p /etc/apparmor.d/local
+    touch "$local_file"
+
+    if ! grep -qF "$marker" "$local_file" 2>/dev/null; then
+        cat >>"$local_file" <<EOF
+
+${marker}
+${CONFIG_DIR}/ r,
+${CONFIG_DIR}/** r,
+${CONFIG_DIR}/data/mariadb/ r,
+${CONFIG_DIR}/data/mariadb/** rwk,
+${CONFIG_DIR}/run/ r,
+${CONFIG_DIR}/run/** rwk,
+${CONF_DIR}/ r,
+${CONF_DIR}/** r,
+EOF
+    fi
+
+    if ! apparmor_parser -r "$profile" 2>/dev/null; then
+        warn "Could not reload AppArmor profile ${profile}; MariaDB may still hit Permission denied."
+        warn "If init fails, run: aa-complain ${profile}  OR  systemctl reload apparmor"
+    else
+        ok "AppArmor profile updated for isolated MariaDB datadir."
+    fi
+}
+
+init_native_mariadb_datadir() {
+    local install_db
+    local mysql_user="mysql"
+
+    id -u "$mysql_user" &>/dev/null || die "System user '${mysql_user}' not found (install mariadb-server first)."
+
+    mkdir -p "${CONFIG_DIR}/data/mariadb" "$RUN_DIR"
+    chmod 755 "$CONFIG_DIR"
+    chmod 1777 "$RUN_DIR" 2>/dev/null || chmod 755 "$RUN_DIR"
+    configure_native_mariadb_apparmor
+
+    if [[ -d "${CONFIG_DIR}/data/mariadb/mysql" ]]; then
+        chown -R "${mysql_user}:${mysql_user}" "${CONFIG_DIR}/data/mariadb"
+        chmod 750 "${CONFIG_DIR}/data/mariadb"
+        ok "MariaDB datadir already initialized."
+        return 0
+    fi
+
+    install_db="$(find_mariadb_install_db)" || die "mariadb-install-db not found."
+    info "Initializing isolated MariaDB datadir..."
+
+    # Clear any partial failed init (often left as root-owned files).
+    find "${CONFIG_DIR}/data/mariadb" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    chown -R "${mysql_user}:${mysql_user}" "${CONFIG_DIR}/data/mariadb"
+    chmod 750 "${CONFIG_DIR}/data/mariadb"
+
+    if ! "$install_db" --user="$mysql_user" --datadir="${CONFIG_DIR}/data/mariadb"; then
+        warn "Primary mariadb-install-db failed; retrying with basedir..."
+        if ! "$install_db" --user="$mysql_user" --basedir=/usr --datadir="${CONFIG_DIR}/data/mariadb"; then
+            err "Failed to initialize MariaDB datadir."
+            err "Check ownership (must be mysql:mysql) and AppArmor for custom datadir under ${CONFIG_DIR}."
+            die "Failed to initialize MariaDB datadir."
+        fi
+    fi
+    chown -R "${mysql_user}:${mysql_user}" "${CONFIG_DIR}/data/mariadb"
+    ok "MariaDB datadir initialized."
 }
 
 # ── Version / status (no network in menu) ──────────────────────────────────────
@@ -1618,29 +1701,6 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-}
-
-init_native_mariadb_datadir() {
-    local install_db
-    mkdir -p "${CONFIG_DIR}/data/mariadb" "$RUN_DIR"
-    chmod 1777 "$RUN_DIR" 2>/dev/null || chmod 755 "$RUN_DIR"
-
-    if [[ -d "${CONFIG_DIR}/data/mariadb/mysql" ]]; then
-        chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
-        ok "MariaDB datadir already initialized."
-        return 0
-    fi
-
-    install_db="$(find_mariadb_install_db)" || die "mariadb-install-db not found."
-    info "Initializing isolated MariaDB datadir..."
-    chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
-    if ! "$install_db" --user=mysql --datadir="${CONFIG_DIR}/data/mariadb" >/dev/null 2>&1; then
-        # Fallback used on some MariaDB packages.
-        "$install_db" --user=mysql --basedir=/usr --datadir="${CONFIG_DIR}/data/mariadb" >/dev/null \
-            || die "Failed to initialize MariaDB datadir."
-    fi
-    chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
-    ok "MariaDB datadir initialized."
 }
 
 wait_for_native_mariadb() {
