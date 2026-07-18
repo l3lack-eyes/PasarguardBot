@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.2"
+readonly SCRIPT_VERSION="1.2.3"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1619,21 +1619,26 @@ write_native_mariadb_conf() {
     cat >"${CONF_DIR}/mariadb.cnf" <<EOF
 [mysqld]
 user=mysql
-port=${MARIADB_PORT}
-bind-address=127.0.0.1
+basedir=/usr
 datadir=${CONFIG_DIR}/data/mariadb
 socket=${RUN_DIR}/mariadb.sock
 pid-file=${RUN_DIR}/mariadb.pid
+port=${MARIADB_PORT}
+bind-address=127.0.0.1
 character-set-server=utf8mb4
 collation-server=utf8mb4_unicode_ci
 skip-character-set-client-handshake
-skip-networking=0
 innodb_buffer_pool_size=128M
+# Keep error log under our datadir for easier debugging
+log_error=${CONFIG_DIR}/data/mariadb/error.log
 
 [client]
 port=${MARIADB_PORT}
 socket=${RUN_DIR}/mariadb.sock
+host=127.0.0.1
 EOF
+    chmod 644 "${CONF_DIR}/mariadb.cnf"
+    chown root:root "${CONF_DIR}/mariadb.cnf"
 }
 
 write_native_systemd_units() {
@@ -1658,19 +1663,26 @@ WorkingDirectory=${CONFIG_DIR}
 WantedBy=multi-user.target
 EOF
 
+    # AppArmorProfile=unconfined: Ubuntu AppArmor blocks custom datadirs outside /var/lib/mysql.
     cat >/etc/systemd/system/pasarguardbot-mariadb.service <<EOF
 [Unit]
 Description=PasarguardBot MariaDB (isolated)
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=mysql
 Group=mysql
+AppArmorProfile=unconfined
+ExecStartPre=+/bin/mkdir -p ${RUN_DIR} ${CONFIG_DIR}/data/mariadb
+ExecStartPre=+/bin/chown mysql:mysql ${CONFIG_DIR}/data/mariadb
+ExecStartPre=+/bin/chmod 1777 ${RUN_DIR}
 ExecStart=${mysqld_bin} --defaults-file=${CONF_DIR}/mariadb.cnf
 Restart=on-failure
-RestartSec=5
+RestartSec=3
 LimitNOFILE=65535
+TimeoutStartSec=60
 
 [Install]
 WantedBy=multi-user.target
@@ -1717,36 +1729,62 @@ EOF
     systemctl daemon-reload
 }
 
+dump_native_mariadb_logs() {
+    err "MariaDB service diagnostics:"
+    systemctl status pasarguardbot-mariadb.service --no-pager -l 2>&1 | tail -n 40 || true
+    echo
+    journalctl -u pasarguardbot-mariadb -n 60 --no-pager 2>&1 || true
+    if [[ -f "${CONFIG_DIR}/data/mariadb/error.log" ]]; then
+        echo
+        err "MariaDB error.log:"
+        tail -n 40 "${CONFIG_DIR}/data/mariadb/error.log" || true
+    fi
+}
+
 wait_for_native_mariadb() {
     local i=0
-    local max=60
+    local max=90
     local root_pass
     root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
     info "Waiting for isolated MariaDB on port ${MARIADB_PORT}..."
+
     while (( i < max )); do
-        if command -v mariadb &>/dev/null; then
-            if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null; then
-                ok "MariaDB is ready."
-                return 0
-            fi
-            if [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
-                ok "MariaDB is ready."
-                return 0
-            fi
-        elif command -v mysql &>/dev/null; then
-            if mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null; then
-                ok "MariaDB is ready."
-                return 0
-            fi
-            if [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
-                ok "MariaDB is ready."
-                return 0
+        if systemctl is-failed --quiet pasarguardbot-mariadb.service 2>/dev/null; then
+            dump_native_mariadb_logs
+            die "pasarguardbot-mariadb.service failed to start."
+        fi
+
+        # TCP readiness (works even before auth is fully usable).
+        if bash -c "echo >/dev/tcp/127.0.0.1/${MARIADB_PORT}" 2>/dev/null; then
+            if command -v mariadb &>/dev/null; then
+                if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -e "SELECT 1" &>/dev/null \
+                    || { [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
+                    ok "MariaDB is ready."
+                    return 0
+                fi
+                if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null \
+                    || { [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
+                    ok "MariaDB is ready."
+                    return 0
+                fi
+            elif command -v mysql &>/dev/null; then
+                if mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -e "SELECT 1" &>/dev/null \
+                    || { [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
+                    ok "MariaDB is ready."
+                    return 0
+                fi
             fi
         fi
+
         sleep 1
         i=$((i + 1))
+        if (( i % 15 == 0 )); then
+            warn "Still waiting for MariaDB... (${i}s) status=$(systemctl is-active pasarguardbot-mariadb.service 2>/dev/null || echo unknown)"
+        fi
     done
-    die "Isolated MariaDB did not become ready. Check: journalctl -u pasarguardbot-mariadb -n 50"
+
+    dump_native_mariadb_logs
+    die "Isolated MariaDB did not become ready within ${max}s."
 }
 
 mariadb_admin_cli() {
@@ -1952,8 +1990,15 @@ native_systemctl() {
 
 start_native_services() {
     info "Starting native systemd services..."
+    configure_native_mariadb_apparmor || true
+    systemctl reset-failed pasarguardbot-redis.service pasarguardbot-mariadb.service 2>/dev/null || true
     native_systemctl enable --now pasarguardbot-redis.service
-    native_systemctl enable --now pasarguardbot-mariadb.service
+    # Make sure unit/config from this script version are loaded.
+    systemctl daemon-reload
+    if ! native_systemctl enable --now pasarguardbot-mariadb.service; then
+        dump_native_mariadb_logs
+        die "Failed to start pasarguardbot-mariadb.service"
+    fi
     wait_for_native_mariadb
     setup_native_mariadb_user
     native_systemctl enable --now pasarguardbot-phpmyadmin.service
