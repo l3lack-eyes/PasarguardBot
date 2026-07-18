@@ -21,6 +21,7 @@ from app.telegram.user.balance.messages import (
     _require_balance_payment_step,
     manual_card_amount_placeholders,
     manual_card_prompt_amount,
+    remember_balance_flow_message,
     return_to_balance_menu,
     return_to_home_menu,
 )
@@ -94,11 +95,12 @@ async def manual_card_payment_callback(event: events.CallbackQuery.Event):
         await event.answer(texts.PAYMENT_DISABLED_ALERT, alert=True)
         raise events.StopPropagation
 
-    if user.number:
+    pay_phone_verify = bool(getattr(settings, "pay_phone_verify", True))
+    if pay_phone_verify and not user.number:
+        await _request_phone_for_balance_payment(event)
+    else:
         await manual_card_prompt_amount(event)
         await set_step(user_id=event.sender_id, step=states.STEP_CART_B_CART_AMOUNT)
-    else:
-        await _request_phone_for_balance_payment(event)
     raise events.StopPropagation
 
 
@@ -123,8 +125,6 @@ async def manual_card_send_photo_callback(event: events.CallbackQuery.Event):
         receipt_request_text.format(**ph),
         buttons=await balance_flow_cancel_rows(),
     )
-    from app.telegram.user.balance.messages import remember_balance_flow_message
-
     await remember_balance_flow_message(event.sender_id, event.message_id)
     await set_step(user_id=event.sender_id, step=states.STEP_MABLAGH_SHARJ)
     raise events.StopPropagation

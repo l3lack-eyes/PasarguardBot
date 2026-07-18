@@ -63,6 +63,7 @@ SETTINGS_MENU_SECTIONS = (
         (
             SettingsMenuItem("دکمه کارت دستی", "pay_mode"),
             SettingsMenuItem("دکمه درگاه ارزی", "arz_mode"),
+            SettingsMenuItem("تایید شماره کارت", "pay_phone_verify", default=True, wide=True),
         ),
         columns=2,
     ),
