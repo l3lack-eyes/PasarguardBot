@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.6"
+readonly SCRIPT_VERSION="1.2.7"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -2029,8 +2029,55 @@ remove_native_systemd_units() {
     stop_native_services
     for unit in "${NATIVE_UNITS[@]}"; do
         rm -f "/etc/systemd/system/${unit}"
+        rm -f "/etc/systemd/system/multi-user.target.wants/${unit}"
     done
     systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed 2>/dev/null || true
+}
+
+# Full wipe for native + docker leftovers (safe for reinstall testing).
+purge_pasarguardbot_everything() {
+    info "Purging all PasarguardBot install files and services..."
+
+    # Native systemd
+    remove_native_systemd_units 2>/dev/null || true
+    for unit in pasarguardbot.service pasarguardbot-phpmyadmin.service pasarguardbot-mariadb.service pasarguardbot-redis.service; do
+        systemctl stop "$unit" 2>/dev/null || true
+        systemctl disable "$unit" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${unit}" \
+            "/etc/systemd/system/multi-user.target.wants/${unit}"
+    done
+
+    # Docker compose stack (if present)
+    if [[ -f "$COMPOSE_FILE" ]] && command -v docker &>/dev/null; then
+        docker_compose down --remove-orphans 2>/dev/null || true
+    fi
+    docker rm -f pasarguardbot pasarguardbot-redis pasarguardbot-mariadb pasarguardbot-phpmyadmin 2>/dev/null || true
+
+    # Kill anything still bound to our ports / leftover mysqld on our datadir
+    if command -v fuser &>/dev/null; then
+        fuser -k 6160/tcp 6161/tcp 6162/tcp 6163/tcp 2>/dev/null || true
+    fi
+    pkill -f '/opt/pasarguardbot/conf/mariadb.cnf' 2>/dev/null || true
+    pkill -f '/opt/pasarguardbot/conf/redis.conf' 2>/dev/null || true
+
+    # AppArmor local rules we added
+    for f in /etc/apparmor.d/local/usr.sbin.mariadbd /etc/apparmor.d/local/usr.sbin.mysqld; do
+        if [[ -f "$f" ]] && grep -qF '# pasarguardbot-native' "$f" 2>/dev/null; then
+            # Remove our marker block (best-effort).
+            sed -i '/# pasarguardbot-native/,+8d' "$f" 2>/dev/null || true
+        fi
+    done
+    if command -v apparmor_parser &>/dev/null; then
+        apparmor_parser -r /etc/apparmor.d/usr.sbin.mariadbd 2>/dev/null || true
+        apparmor_parser -r /etc/apparmor.d/usr.sbin.mysqld 2>/dev/null || true
+    fi
+
+    rm -rf "$CONFIG_DIR"
+    rm -f "$MANAGER_BIN"
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed 2>/dev/null || true
+    ok "PasarguardBot fully purged from this server."
 }
 
 wait_for_native_bot() {
@@ -2228,17 +2275,10 @@ action_uninstall_docker() {
                 info "Cancelled."
                 return 0
             }
-            if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
-                docker_compose down --remove-orphans 2>/dev/null || true
-            else
-                cleanup_stale_named_containers
-            fi
             while IFS= read -r img_id; do
                 [[ -n "$img_id" ]] && docker rmi "$img_id" 2>/dev/null || true
             done < <(docker images "${BOT_IMAGE}" -q 2>/dev/null || true)
-            rm -rf "$CONFIG_DIR"
-            rm -f "$MANAGER_BIN"
-            ok "All PasarguardBot files removed."
+            purge_pasarguardbot_everything
             ;;
         *)
             info "Cancelled."
@@ -2280,11 +2320,7 @@ action_uninstall_native() {
                 info "Cancelled."
                 return 0
             }
-            remove_native_systemd_units
-            rm -rf "$CONFIG_DIR"
-            rm -f "$MANAGER_BIN"
-            ok "All PasarguardBot native files and units removed."
-            info "System MariaDB/Redis packages (if any) were left installed but untouched."
+            purge_pasarguardbot_everything
             ;;
         *)
             info "Cancelled."
@@ -2604,6 +2640,10 @@ bootstrap "$@"
 case "${1:-}" in
     install)        action_install ;;
     uninstall)      action_uninstall ;;
+    purge)
+        require_root
+        purge_pasarguardbot_everything
+        ;;
     update)         action_update ;;
     update-script)  action_update_script ;;
     logs)           action_logs_live ;;
@@ -2612,7 +2652,7 @@ case "${1:-}" in
     urls)           action_urls ;;
     ""|menu)        main_menu ;;
     *)
-        echo "Usage: pasarguardbot [install|uninstall|update|update-script|logs|restart|status|urls|menu]"
+        echo "Usage: pasarguardbot [install|uninstall|purge|update|update-script|logs|restart|status|urls|menu]"
         exit 1
         ;;
 esac
