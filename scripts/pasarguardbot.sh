@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.14"
+readonly SCRIPT_VERSION="1.2.15"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1224,8 +1224,8 @@ validate_compose_file() {
         err "Compose file is empty."
         return 1
     }
-    grep -q 'ghcr.io/amirkenzo/pasarguardbot:latest' "$file" || {
-        err "Compose file missing required image ghcr.io/amirkenzo/pasarguardbot:latest"
+    grep -qE 'ghcr\.io/amirkenzo/pasarguardbot(:|\$\{)' "$file" || {
+        err "Compose file missing required image ghcr.io/amirkenzo/pasarguardbot"
         return 1
     }
     if grep -E '^\s+build:' "$file" >/dev/null 2>&1; then
