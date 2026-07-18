@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.4"
+readonly SCRIPT_VERSION="1.2.5"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -1630,26 +1630,26 @@ EOF
 }
 
 write_native_mariadb_conf() {
+    # Socket lives inside datadir (owned by mysql) to avoid /run permission denials.
     cat >"${CONF_DIR}/mariadb.cnf" <<EOF
 [mysqld]
 user=mysql
 basedir=/usr
 datadir=${CONFIG_DIR}/data/mariadb
-socket=${RUN_DIR}/mariadb.sock
-pid-file=${RUN_DIR}/mariadb.pid
+socket=${CONFIG_DIR}/data/mariadb/pasarguardbot.sock
+pid-file=${CONFIG_DIR}/data/mariadb/pasarguardbot.pid
 port=${MARIADB_PORT}
 bind-address=127.0.0.1
 character-set-server=utf8mb4
 collation-server=utf8mb4_unicode_ci
 skip-character-set-client-handshake
 innodb_buffer_pool_size=128M
-# Keep error log under our datadir for easier debugging
 log_error=${CONFIG_DIR}/data/mariadb/error.log
 
 [client]
+# Do NOT set host=127.0.0.1 here — that forces TCP and breaks unix_socket root auth.
 port=${MARIADB_PORT}
-socket=${RUN_DIR}/mariadb.sock
-host=127.0.0.1
+socket=${CONFIG_DIR}/data/mariadb/pasarguardbot.sock
 EOF
     chmod 644 "${CONF_DIR}/mariadb.cnf"
     chown root:root "${CONF_DIR}/mariadb.cnf"
@@ -1755,11 +1755,23 @@ dump_native_mariadb_logs() {
     fi
 }
 
+# Connect as OS root via unix socket (Ubuntu auth_socket). Avoid -h so we don't force TCP.
+mariadb_socket_root() {
+    local sock="${CONFIG_DIR}/data/mariadb/pasarguardbot.sock"
+    if command -v mariadb &>/dev/null; then
+        mariadb --socket="$sock" -u root "$@"
+    else
+        mysql --socket="$sock" -u root "$@"
+    fi
+}
+
+mariadb_socket_root_check() {
+    mariadb_socket_root -e "SELECT 1" &>/dev/null
+}
+
 wait_for_native_mariadb() {
     local i=0
     local max=90
-    local root_pass
-    root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
     info "Waiting for isolated MariaDB on port ${MARIADB_PORT}..."
 
     while (( i < max )); do
@@ -1768,25 +1780,17 @@ wait_for_native_mariadb() {
             die "pasarguardbot-mariadb.service failed to start."
         fi
 
-        # TCP readiness (works even before auth is fully usable).
+        # Prefer unix_socket root auth (works as system root on Ubuntu).
+        if [[ -S "${CONFIG_DIR}/data/mariadb/pasarguardbot.sock" ]] && mariadb_socket_root_check; then
+            ok "MariaDB is ready (unix socket)."
+            return 0
+        fi
+
+        # TCP up is a weaker signal; keep waiting for usable root socket auth.
         if bash -c "echo >/dev/tcp/127.0.0.1/${MARIADB_PORT}" 2>/dev/null; then
-            if command -v mariadb &>/dev/null; then
-                if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -e "SELECT 1" &>/dev/null \
-                    || { [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
-                    ok "MariaDB is ready."
-                    return 0
-                fi
-                if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null \
-                    || { [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
-                    ok "MariaDB is ready."
-                    return 0
-                fi
-            elif command -v mysql &>/dev/null; then
-                if mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -e "SELECT 1" &>/dev/null \
-                    || { [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -h 127.0.0.1 -P "${MARIADB_PORT}" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; }; then
-                    ok "MariaDB is ready."
-                    return 0
-                fi
+            if mariadb_socket_root_check; then
+                ok "MariaDB is ready."
+                return 0
             fi
         fi
 
@@ -1802,21 +1806,8 @@ wait_for_native_mariadb() {
 }
 
 mariadb_admin_cli() {
-    local root_pass
-    root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
-    if command -v mariadb &>/dev/null; then
-        if [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
-            mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" "$@"
-            return
-        fi
-        mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root "$@"
-    else
-        if [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
-            mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" "$@"
-            return
-        fi
-        mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root "$@"
-    fi
+    # Admin tasks always go through unix socket as root (auth_socket).
+    mariadb_socket_root "$@"
 }
 
 setup_native_mariadb_user() {
@@ -1827,23 +1818,23 @@ setup_native_mariadb_user() {
     [[ -n "$db_root_pass" ]] || die "MARIADB_ROOT_PASSWORD missing from .env"
 
     info "Creating PasarguardBot database and user..."
-    # Compatible with MariaDB versions that lack CREATE USER IF NOT EXISTS.
+    mariadb_socket_root_check || die "Cannot connect to MariaDB as root via unix socket."
+
     mariadb_admin_cli <<SQL
 CREATE DATABASE IF NOT EXISTS pasarguardbot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
-GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'localhost' IDENTIFIED BY '${db_pass}';
+CREATE USER IF NOT EXISTS 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
+CREATE USER IF NOT EXISTS 'pasarguardbot'@'localhost' IDENTIFIED BY '${db_pass}';
+ALTER USER 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
+ALTER USER 'pasarguardbot'@'localhost' IDENTIFIED BY '${db_pass}';
+GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'127.0.0.1';
+GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'localhost';
+-- Allow root password login over TCP (phpMyAdmin); keep unix_socket for local root.
+ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket OR mysql_native_password BY '${db_root_pass}';
+CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '${db_root_pass}';
+ALTER USER 'root'@'127.0.0.1' IDENTIFIED BY '${db_root_pass}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
-    # Set root password last so earlier statements can connect without it on first boot.
-    if command -v mariadb &>/dev/null; then
-        mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_root_pass}'; FLUSH PRIVILEGES;" 2>/dev/null \
-            || mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${db_root_pass}" -e "SELECT 1" &>/dev/null \
-            || warn "Could not set/verify MariaDB root password (may already be configured)."
-    else
-        mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_root_pass}'; FLUSH PRIVILEGES;" 2>/dev/null \
-            || mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${db_root_pass}" -e "SELECT 1" &>/dev/null \
-            || warn "Could not set/verify MariaDB root password (may already be configured)."
-    fi
     ok "Database user ready."
 }
 
@@ -2010,10 +2001,12 @@ start_native_services() {
     info "Starting native systemd services..."
     configure_native_mariadb_apparmor || true
     systemctl reset-failed pasarguardbot-redis.service pasarguardbot-mariadb.service 2>/dev/null || true
-    native_systemctl enable --now pasarguardbot-redis.service
-    # Make sure unit/config from this script version are loaded.
+    native_systemctl enable pasarguardbot-redis.service
+    native_systemctl restart pasarguardbot-redis.service || native_systemctl start pasarguardbot-redis.service
     systemctl daemon-reload
-    if ! native_systemctl enable --now pasarguardbot-mariadb.service; then
+    native_systemctl enable pasarguardbot-mariadb.service
+    # restart applies latest mariadb.cnf (socket path, etc.)
+    if ! native_systemctl restart pasarguardbot-mariadb.service; then
         dump_native_mariadb_logs
         die "Failed to start pasarguardbot-mariadb.service"
     fi
