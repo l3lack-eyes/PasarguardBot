@@ -2,13 +2,15 @@
 # PasarguardBot — install & management script (Docker + Native)
 # https://github.com/AmirKenzo/PasarguardBot
 #
-# Install:
+# Install (main):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh)
+# Install (dev / no cache):
+#   PASARGUARDBOT_BRANCH=dev bash <(curl -fsSL "https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/dev/scripts/pasarguardbot.sh?$(date +%s)")
 
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.3"
+readonly SCRIPT_VERSION="1.2.4"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -19,14 +21,16 @@ readonly RUN_DIR="${CONFIG_DIR}/run"
 readonly PHPMYADMIN_DIR="${CONFIG_DIR}/phpmyadmin"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
-readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
+# Override while testing: PASARGUARDBOT_BRANCH=dev
+readonly REPO_BRANCH="${PASARGUARDBOT_BRANCH:-main}"
+readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/scripts/pasarguardbot.sh"
 readonly NETPLAN_FIX_SCRIPT_NAME="fix-docker-netplan.sh"
 readonly NETPLAN_FIX_INSTALLED="${CONFIG_DIR}/${NETPLAN_FIX_SCRIPT_NAME}"
 readonly NETPLAN_FIX_RAW_URL="${SCRIPT_RAW_URL/pasarguardbot.sh/${NETPLAN_FIX_SCRIPT_NAME}}"
-readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/docker-compose.yml"
-readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/.env.example"
+readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/docker-compose.yml"
+readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/.env.example"
 readonly REPO_GIT_URL="https://github.com/AmirKenzo/PasarguardBot.git"
-readonly REPO_ARCHIVE_URL="https://github.com/AmirKenzo/PasarguardBot/archive/refs/heads/main.tar.gz"
+readonly REPO_ARCHIVE_URL="https://github.com/AmirKenzo/PasarguardBot/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 readonly PHPMYADMIN_ARCHIVE_URL="https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
 readonly BOT_IMAGE_TAG="latest"
@@ -134,13 +138,20 @@ curl_get() {
         --retry-delay "$CURL_RETRY_DELAY" \
         --connect-timeout "$CURL_CONNECT_TIMEOUT" \
         --max-time "$CURL_MAX_TIME" \
+        -H "Cache-Control: no-cache" \
+        -H "Pragma: no-cache" \
         "$@"
 }
 
 curl_download() {
     local url="$1"
     local dest="$2"
-    curl_get -o "$dest" "$url"
+    # Cache-bust query for raw.githubusercontent.com / CDNs
+    if [[ "$url" == *"?"* ]]; then
+        curl_get -o "$dest" "${url}&_ts=$(date +%s)"
+    else
+        curl_get -o "$dest" "${url}?_ts=$(date +%s)"
+    fi
 }
 
 explain_network_failure() {
@@ -1508,20 +1519,23 @@ manager_command_ready() {
 }
 
 install_manager_command() {
-    local tmp
-    tmp="$(mktemp)"
+    local tmp src="${BASH_SOURCE[0]:-}"
 
-    info "Installing manager script from GitHub..."
+    # Prefer the script that is currently running (e.g. curl from dev),
+    # so we do not overwrite it with an older copy from another branch.
+    if [[ -n "$src" && -r "$src" && -s "$src" ]] && head -1 "$src" | grep -q '#!/usr/bin/env bash'; then
+        info "Installing manager script from the running copy ($(format_version "$SCRIPT_VERSION"), branch=${REPO_BRANCH})..."
+        install_manager_from_file "$src"
+        ok "pasarguardbot command installed at ${MANAGER_BIN}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    info "Installing manager script from GitHub (${REPO_BRANCH})..."
     if ! curl_download "$SCRIPT_RAW_URL" "$tmp"; then
         rm -f "$tmp"
-        # Fallback: if we are already running a local copy, install that.
-        if [[ -f "${BASH_SOURCE[0]:-}" && -s "${BASH_SOURCE[0]}" ]]; then
-            warn "Could not download manager script; installing the running copy."
-            cp "${BASH_SOURCE[0]}" "$tmp"
-        else
-            explain_network_failure "download manager script"
-            exit 1
-        fi
+        explain_network_failure "download manager script"
+        exit 1
     fi
 
     install_manager_from_file "$tmp"
@@ -1891,19 +1905,19 @@ install_uv_binary() {
 }
 
 fetch_bot_source() {
-    local tmp tmpdir force_refresh="${1:-0}"
+    local tmp tmpdir force_refresh="${1:-0}" extracted=""
     ensure_config_dirs
 
     if [[ "$force_refresh" == "1" ]] && [[ -d "${APP_DIR}/.git" ]]; then
-        info "Updating existing git checkout in ${APP_DIR}..."
-        git -C "$APP_DIR" fetch --depth 1 origin main
-        git -C "$APP_DIR" reset --hard origin/main
+        info "Updating existing git checkout in ${APP_DIR} (branch ${REPO_BRANCH})..."
+        git -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+        git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
         ok "Source updated."
         return 0
     fi
 
     if [[ "$force_refresh" == "1" ]] && [[ -f "${APP_DIR}/main.py" ]]; then
-        info "Refreshing bot source from GitHub archive..."
+        info "Refreshing bot source from GitHub archive (${REPO_BRANCH})..."
         tmp="$(mktemp)"
         tmpdir="$(mktemp -d)"
         if ! curl_download "$REPO_ARCHIVE_URL" "$tmp"; then
@@ -1913,10 +1927,12 @@ fetch_bot_source() {
             exit 1
         fi
         tar -xzf "$tmp" -C "$tmpdir"
+        extracted="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)"
+        [[ -n "$extracted" ]] || die "Could not find extracted source directory."
         # Preserve local venv / uv cache if present.
         rm -rf "${APP_DIR}.bak"
         mv "$APP_DIR" "${APP_DIR}.bak"
-        mv "$tmpdir"/PasarguardBot-main "$APP_DIR"
+        mv "$extracted" "$APP_DIR"
         if [[ -d "${APP_DIR}.bak/.venv" ]]; then
             mv "${APP_DIR}.bak/.venv" "${APP_DIR}/.venv"
         fi
@@ -1927,9 +1943,9 @@ fetch_bot_source() {
     fi
 
     if [[ -d "${APP_DIR}/.git" ]]; then
-        info "Updating existing git checkout in ${APP_DIR}..."
-        git -C "$APP_DIR" fetch --depth 1 origin main
-        git -C "$APP_DIR" reset --hard origin/main
+        info "Updating existing git checkout in ${APP_DIR} (branch ${REPO_BRANCH})..."
+        git -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+        git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
         ok "Source updated."
         return 0
     fi
@@ -1939,11 +1955,11 @@ fetch_bot_source() {
         return 0
     fi
 
-    info "Downloading bot source from GitHub..."
+    info "Downloading bot source from GitHub (${REPO_BRANCH})..."
     rm -rf "${APP_DIR}"
     mkdir -p "$(dirname "$APP_DIR")"
 
-    if command -v git &>/dev/null && git clone --depth 1 --branch main "$REPO_GIT_URL" "$APP_DIR"; then
+    if command -v git &>/dev/null && git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_GIT_URL" "$APP_DIR"; then
         ok "Cloned repository to ${APP_DIR}"
         return 0
     fi
@@ -1958,7 +1974,9 @@ fetch_bot_source() {
         exit 1
     fi
     tar -xzf "$tmp" -C "$tmpdir"
-    mv "$tmpdir"/PasarguardBot-main "$APP_DIR"
+    extracted="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    [[ -n "$extracted" ]] || die "Could not find extracted source directory."
+    mv "$extracted" "$APP_DIR"
     rm -f "$tmp"
     rm -rf "$tmpdir"
     ok "Source extracted to ${APP_DIR}"
