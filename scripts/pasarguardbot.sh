@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.1"
+readonly SCRIPT_VERSION="1.2.2"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
@@ -215,8 +215,11 @@ is_installed() {
     mode="$(get_install_mode)"
     case "$mode" in
         docker) [[ -f "$COMPOSE_FILE" ]] ;;
-        native) [[ -d "$APP_DIR" ]] || [[ -f /etc/systemd/system/pasarguardbot.service ]] ;;
-        *) [[ -f "$COMPOSE_FILE" || -d "$APP_DIR" ]] ;;
+        native)
+            # Empty APP_DIR from mkdir is not a real install.
+            [[ -f "${APP_DIR}/main.py" ]] || [[ -f /etc/systemd/system/pasarguardbot.service ]]
+            ;;
+        *) [[ -f "$COMPOSE_FILE" || -f "${APP_DIR}/main.py" ]] ;;
     esac
 }
 
@@ -610,11 +613,15 @@ check_disk_space() {
 port_in_use() {
     local port="$1"
     if command -v ss &>/dev/null; then
-        ss -ltn 2>/dev/null | grep -qE ":${port}\\s" && return 0
+        if ss -ltn 2>/dev/null | grep -qE ":${port}\\s"; then
+            return 0
+        fi
         return 1
     fi
     if command -v netstat &>/dev/null; then
-        netstat -ltn 2>/dev/null | grep -qE ":${port}\\s" && return 0
+        if netstat -ltn 2>/dev/null | grep -qE ":${port}\\s"; then
+            return 0
+        fi
         return 1
     fi
     return 1
@@ -627,25 +634,28 @@ check_required_ports() {
     local mode="${1:-}"
 
     for port in "${ports[@]}"; do
-        if port_in_use "$port"; then
-            # Allow reinstall when our own containers already own the ports.
+        if ! port_in_use "$port"; then
+            continue
+        fi
+        # Allow reinstall when our own containers already own the ports.
+        if command -v docker &>/dev/null; then
             if docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -qE "pasarguardbot.*:${port}->|:.*:${port}->"; then
                 continue
             fi
-            # Allow reinstall when our own native systemd units already own the ports.
-            if [[ "$mode" == "native" ]] || is_native_mode; then
-                if systemctl is-active --quiet pasarguardbot.service 2>/dev/null \
-                    || systemctl is-active --quiet pasarguardbot-redis.service 2>/dev/null \
-                    || systemctl is-active --quiet pasarguardbot-mariadb.service 2>/dev/null \
-                    || systemctl is-active --quiet pasarguardbot-phpmyadmin.service 2>/dev/null; then
-                    if ss -ltnp 2>/dev/null | grep -E ":${port}\\s" | grep -qE 'pasarguardbot|mysqld|mariadbd|redis-server|php'; then
-                        continue
-                    fi
+        fi
+        # Allow reinstall when our own native systemd units already own the ports.
+        if [[ "$mode" == "native" ]] || is_native_mode; then
+            if systemctl is-active --quiet pasarguardbot.service 2>/dev/null \
+                || systemctl is-active --quiet pasarguardbot-redis.service 2>/dev/null \
+                || systemctl is-active --quiet pasarguardbot-mariadb.service 2>/dev/null \
+                || systemctl is-active --quiet pasarguardbot-phpmyadmin.service 2>/dev/null; then
+                if ss -ltnp 2>/dev/null | grep -E ":${port}\\s" | grep -qE 'pasarguardbot|mysqld|mariadbd|redis-server|php'; then
+                    continue
                 fi
             fi
-            warn "Port ${port} appears to be in use."
-            busy=1
         fi
+        warn "Port ${port} appears to be in use."
+        busy=1
     done
 
     if (( busy )); then
@@ -653,6 +663,7 @@ check_required_ports() {
         read -r -p "Continue anyway? (y/N): " confirm || true
         [[ "${confirm,,}" == "y" ]] || die "Aborted due to occupied ports."
     fi
+    return 0
 }
 
 ensure_config_dirs() {
@@ -661,7 +672,10 @@ ensure_config_dirs() {
     chmod 755 "$CONFIG_DIR"
     chmod 755 "$RUN_DIR" "$CONF_DIR" "${CONFIG_DIR}/data" 2>/dev/null || true
     chmod 750 "${CONFIG_DIR}/data/mariadb" "${CONFIG_DIR}/data/redis" 2>/dev/null || true
-    [[ -f "$ENV_FILE" ]] && chmod 600 "$ENV_FILE"
+    if [[ -f "$ENV_FILE" ]]; then
+        chmod 600 "$ENV_FILE" || true
+    fi
+    return 0
 }
 
 configure_native_mariadb_apparmor() {
