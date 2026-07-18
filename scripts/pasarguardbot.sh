@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PasarguardBot — Docker install & management script
+# PasarguardBot — install & management script (Docker + Native)
 # https://github.com/AmirKenzo/PasarguardBot
 #
 # Install:
@@ -8,10 +8,15 @@
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.1.1"
+readonly SCRIPT_VERSION="1.2.0"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
+readonly INSTALL_MODE_FILE="${CONFIG_DIR}/.install_mode"
+readonly APP_DIR="${CONFIG_DIR}/app"
+readonly CONF_DIR="${CONFIG_DIR}/conf"
+readonly RUN_DIR="${CONFIG_DIR}/run"
+readonly PHPMYADMIN_DIR="${CONFIG_DIR}/phpmyadmin"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh"
@@ -20,14 +25,27 @@ readonly NETPLAN_FIX_INSTALLED="${CONFIG_DIR}/${NETPLAN_FIX_SCRIPT_NAME}"
 readonly NETPLAN_FIX_RAW_URL="${SCRIPT_RAW_URL/pasarguardbot.sh/${NETPLAN_FIX_SCRIPT_NAME}}"
 readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/docker-compose.yml"
 readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/.env.example"
+readonly REPO_GIT_URL="https://github.com/AmirKenzo/PasarguardBot.git"
+readonly REPO_ARCHIVE_URL="https://github.com/AmirKenzo/PasarguardBot/archive/refs/heads/main.tar.gz"
+readonly PHPMYADMIN_ARCHIVE_URL="https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
 readonly BOT_IMAGE_TAG="latest"
+readonly FASTAPI_PORT_DEFAULT=6160
+readonly REDIS_PORT=6161
+readonly MARIADB_PORT=6162
 readonly PHPMYADMIN_PORT=6163
 readonly MIN_DISK_MB=2048
 readonly CURL_CONNECT_TIMEOUT=10
 readonly CURL_MAX_TIME=60
 readonly CURL_RETRIES=3
 readonly CURL_RETRY_DELAY=2
+
+readonly NATIVE_UNITS=(
+    pasarguardbot.service
+    pasarguardbot-redis.service
+    pasarguardbot-mariadb.service
+    pasarguardbot-phpmyadmin.service
+)
 
 # Populated by detect_os()
 OS_ID=""
@@ -162,14 +180,59 @@ docker_compose() {
     fi
 }
 
+set_install_mode() {
+    local mode="$1"
+    mkdir -p "$CONFIG_DIR"
+    printf '%s\n' "$mode" >"$INSTALL_MODE_FILE"
+}
+
+get_install_mode() {
+    local mode=""
+    if [[ -f "$INSTALL_MODE_FILE" ]]; then
+        mode="$(tr -d '[:space:]' <"$INSTALL_MODE_FILE" 2>/dev/null || true)"
+    fi
+    if [[ -z "$mode" ]]; then
+        if [[ -f "$COMPOSE_FILE" ]]; then
+            mode="docker"
+        elif [[ -d "$APP_DIR" ]] || [[ -f /etc/systemd/system/pasarguardbot.service ]]; then
+            mode="native"
+        fi
+    fi
+    printf '%s' "${mode:-}"
+}
+
+is_docker_mode() {
+    [[ "$(get_install_mode)" == "docker" ]]
+}
+
+is_native_mode() {
+    [[ "$(get_install_mode)" == "native" ]]
+}
+
 is_installed() {
-    [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]
+    [[ -f "$ENV_FILE" ]] || return 1
+    local mode
+    mode="$(get_install_mode)"
+    case "$mode" in
+        docker) [[ -f "$COMPOSE_FILE" ]] ;;
+        native) [[ -d "$APP_DIR" ]] || [[ -f /etc/systemd/system/pasarguardbot.service ]] ;;
+        *) [[ -f "$COMPOSE_FILE" || -d "$APP_DIR" ]] ;;
+    esac
 }
 
 get_env_value() {
     local key="$1"
     local file="${2:-$ENV_FILE}"
     grep -E "^${key}=" "$file" 2>/dev/null | tail -1 | cut -d= -f2- || true
+}
+
+require_native_os() {
+    case "$PKG_MANAGER" in
+        apt-get) ;;
+        *)
+            die "Native install is supported on Debian/Ubuntu (apt-get) only. Detected: ${OS_PRETTY_NAME} (${PKG_MANAGER}). Use Docker install instead."
+            ;;
+    esac
 }
 
 # ── OS detection & bootstrap ───────────────────────────────────────────────────
@@ -559,8 +622,9 @@ port_in_use() {
 
 check_required_ports() {
     local port
-    local -a ports=(6160 6161 6162 6163)
+    local -a ports=("$FASTAPI_PORT_DEFAULT" "$REDIS_PORT" "$MARIADB_PORT" "$PHPMYADMIN_PORT")
     local busy=0
+    local mode="${1:-}"
 
     for port in "${ports[@]}"; do
         if port_in_use "$port"; then
@@ -568,26 +632,59 @@ check_required_ports() {
             if docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -qE "pasarguardbot.*:${port}->|:.*:${port}->"; then
                 continue
             fi
+            # Allow reinstall when our own native systemd units already own the ports.
+            if [[ "$mode" == "native" ]] || is_native_mode; then
+                if systemctl is-active --quiet pasarguardbot.service 2>/dev/null \
+                    || systemctl is-active --quiet pasarguardbot-redis.service 2>/dev/null \
+                    || systemctl is-active --quiet pasarguardbot-mariadb.service 2>/dev/null \
+                    || systemctl is-active --quiet pasarguardbot-phpmyadmin.service 2>/dev/null; then
+                    if ss -ltnp 2>/dev/null | grep -E ":${port}\\s" | grep -qE 'pasarguardbot|mysqld|mariadbd|redis-server|php'; then
+                        continue
+                    fi
+                fi
+            fi
             warn "Port ${port} appears to be in use."
             busy=1
         fi
     done
 
     if (( busy )); then
-        warn "Required ports may be occupied (6160 FastAPI, 6161 Redis, 6162 MariaDB, 6163 phpMyAdmin)."
+        warn "Required ports may be occupied (${FASTAPI_PORT_DEFAULT} FastAPI, ${REDIS_PORT} Redis, ${MARIADB_PORT} MariaDB, ${PHPMYADMIN_PORT} phpMyAdmin)."
         read -r -p "Continue anyway? (y/N): " confirm || true
         [[ "${confirm,,}" == "y" ]] || die "Aborted due to occupied ports."
     fi
 }
 
 ensure_config_dirs() {
-    mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis}
+    mkdir -p "$CONFIG_DIR"/{logs,sessions,data/mariadb,data/redis,conf,run,app,phpmyadmin}
     chmod 700 "$CONFIG_DIR"
+    chmod 755 "$RUN_DIR" "$CONF_DIR" 2>/dev/null || true
 }
 
 # ── Version / status (no network in menu) ──────────────────────────────────────
 get_installed_bot_version() {
-    local version revision digest short_id
+    local mode version revision digest short_id pyproject
+
+    mode="$(get_install_mode)"
+    if [[ "$mode" == "native" ]]; then
+        pyproject="${APP_DIR}/pyproject.toml"
+        if [[ -f "$pyproject" ]]; then
+            version="$(grep -m1 '^version[[:space:]]*=' "$pyproject" | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
+            if [[ -n "$version" ]]; then
+                format_version "$version"
+                return 0
+            fi
+        fi
+        if [[ -d "${APP_DIR}/.git" ]] && command -v git &>/dev/null; then
+            version="$(git -C "$APP_DIR" describe --tags --always 2>/dev/null || true)"
+            if [[ -n "$version" ]]; then
+                format_version "$version"
+                return 0
+            fi
+        fi
+        printf '%s' '—'
+        return 0
+    fi
 
     if ! command -v docker &>/dev/null; then
         printf '%s' '—'
@@ -649,7 +746,7 @@ show_service_urls() {
     local ip fastapi_port webhook_secret webhook_url pma_url
     ip="$(detect_server_ip)"
     fastapi_port="$(get_env_value "FASTAPI_PORT")"
-    fastapi_port="${fastapi_port:-6160}"
+    fastapi_port="${fastapi_port:-$FASTAPI_PORT_DEFAULT}"
     webhook_secret="$(get_env_value "WEBHOOK_SECRET")"
     webhook_url="http://${ip}:${fastapi_port}/api/webhook"
     pma_url="http://${ip}:${PHPMYADMIN_PORT}"
@@ -675,8 +772,27 @@ get_container_state() {
 }
 
 get_bot_runtime_summary() {
-    local running total bot_state
-    if ! command -v docker &>/dev/null || ! is_installed; then
+    local running total bot_state mode active
+    mode="$(get_install_mode)"
+
+    if ! is_installed; then
+        printf '%s' '—'
+        return 0
+    fi
+
+    if [[ "$mode" == "native" ]]; then
+        if systemctl is-active --quiet pasarguardbot.service 2>/dev/null; then
+            printf '%s' 'active (systemd)'
+        elif systemctl is-failed --quiet pasarguardbot.service 2>/dev/null; then
+            printf '%s' 'failed (systemd)'
+        else
+            active="$(systemctl is-active pasarguardbot.service 2>/dev/null || printf '%s' 'inactive')"
+            printf '%s (systemd)' "$active"
+        fi
+        return 0
+    fi
+
+    if ! command -v docker &>/dev/null; then
         printf '%s' '—'
         return 0
     fi
@@ -693,19 +809,21 @@ get_bot_runtime_summary() {
 }
 
 show_install_info() {
-    local installed_ver bot_runtime fastapi_port
+    local installed_ver bot_runtime fastapi_port mode
 
     echo -e "  ${C_DIM}Manager script:${C_RESET}  $(format_version "$SCRIPT_VERSION")"
     echo -e "  ${C_DIM}Host OS:${C_RESET}         ${OS_PRETTY_NAME:-unknown}"
 
     if is_installed; then
+        mode="$(get_install_mode)"
         installed_ver="$(get_installed_bot_version)" || installed_ver="—"
         bot_runtime="$(get_bot_runtime_summary)" || bot_runtime="—"
         fastapi_port="$(get_env_value "FASTAPI_PORT")"
-        fastapi_port="${fastapi_port:-6160}"
+        fastapi_port="${fastapi_port:-$FASTAPI_PORT_DEFAULT}"
 
-        echo -e "  ${C_DIM}Bot image:${C_RESET}       ${installed_ver}"
-        echo -e "  ${C_DIM}Bot container:${C_RESET}  ${bot_runtime}"
+        echo -e "  ${C_DIM}Install mode:${C_RESET}    ${mode:-unknown}"
+        echo -e "  ${C_DIM}Bot version:${C_RESET}     ${installed_ver}"
+        echo -e "  ${C_DIM}Bot runtime:${C_RESET}     ${bot_runtime}"
         echo -e "  ${C_DIM}API port:${C_RESET}        ${fastapi_port}"
         echo -e "  ${C_DIM}Config:${C_RESET}          ${CONFIG_DIR}"
     fi
@@ -714,15 +832,17 @@ show_install_info() {
 
 draw_banner() {
     safe_clear
-    echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— Docker manager $(format_version "$SCRIPT_VERSION")${C_RESET}"
+    echo -e "${C_CYAN}${C_BOLD}PasarguardBot${C_RESET} ${C_DIM}— manager $(format_version "$SCRIPT_VERSION")${C_RESET}"
     echo
     show_install_info || true
 }
 
 draw_menu() {
+    local mode
+    mode="$(get_install_mode)"
     draw_banner
     if is_installed; then
-        echo -e "  ${C_GREEN}●${C_RESET} Status: ${C_GREEN}Installed${C_RESET}"
+        echo -e "  ${C_GREEN}●${C_RESET} Status: ${C_GREEN}Installed${C_RESET} ${C_DIM}(${mode:-unknown})${C_RESET}"
     else
         echo -e "  ${C_RED}●${C_RESET} Status: ${C_RED}Not installed${C_RESET}"
     fi
@@ -737,7 +857,11 @@ draw_menu() {
     echo -e "${C_BOLD}  │${C_RESET}  7) Service status                        ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  8) Show webhook & URLs                   ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  │${C_RESET}  9) Update manager script                 ${C_BOLD}│${C_RESET}"
-    echo -e "${C_BOLD}  │${C_RESET} 10) Fix Docker network                     ${C_BOLD}│${C_RESET}"
+    if [[ "$mode" == "native" ]]; then
+        echo -e "${C_BOLD}  │${C_RESET} ${C_DIM}10) Fix Docker network (Docker only)      ${C_RESET}${C_BOLD}│${C_RESET}"
+    else
+        echo -e "${C_BOLD}  │${C_RESET} 10) Fix Docker network                     ${C_BOLD}│${C_RESET}"
+    fi
     echo -e "${C_BOLD}  │${C_RESET}  0) Exit                                   ${C_BOLD}│${C_RESET}"
     echo -e "${C_BOLD}  └─────────────────────────────────────────┘${C_RESET}"
     echo
@@ -783,13 +907,15 @@ append_deploy_paths() {
 }
 
 generate_env_file() {
+    local install_mode="${1:-docker}"
     local api_id api_hash bot_token admin_id
     local db_pass db_root_pass webhook_secret crypto_key
-    local tmp
+    local tmp db_host redis_url
 
     if [[ -f "$ENV_FILE" ]]; then
         warn ".env already exists — keeping the existing file."
         chmod 600 "$ENV_FILE" 2>/dev/null || true
+        set_install_mode "$install_mode"
         return 0
     fi
 
@@ -819,6 +945,14 @@ generate_env_file() {
     webhook_secret="$(rand_hex 16)"
     crypto_key="$(rand_b64 32)"
 
+    if [[ "$install_mode" == "native" ]]; then
+        db_host="127.0.0.1:${MARIADB_PORT}"
+        redis_url="redis://127.0.0.1:${REDIS_PORT}/0"
+    else
+        db_host="mariadb:3306"
+        redis_url="redis://redis:6379/0"
+    fi
+
     cp "$tmp" "$ENV_FILE"
     rm -f "$tmp"
     chmod 600 "$ENV_FILE"
@@ -827,11 +961,11 @@ generate_env_file() {
     set_env_var "$ENV_FILE" "API_HASH" "$api_hash"
     set_env_var "$ENV_FILE" "BOT_TOKEN" "$bot_token"
     set_env_var "$ENV_FILE" "ADMIN_ID" "$admin_id"
-    set_env_var "$ENV_FILE" "SQLALCHEMY_DATABASE_URL" "mysql+asyncmy://pasarguardbot:${db_pass}@mariadb:3306/pasarguardbot"
-    set_env_var "$ENV_FILE" "FASTAPI_PORT" "6160"
+    set_env_var "$ENV_FILE" "SQLALCHEMY_DATABASE_URL" "mysql+asyncmy://pasarguardbot:${db_pass}@${db_host}/pasarguardbot"
+    set_env_var "$ENV_FILE" "FASTAPI_PORT" "$FASTAPI_PORT_DEFAULT"
     set_env_var "$ENV_FILE" "WEBHOOK_SECRET" "$webhook_secret"
     set_env_var "$ENV_FILE" "CRYPTO_KEY" "$crypto_key"
-    set_env_var "$ENV_FILE" "REDIS_URL" "redis://redis:6379/0"
+    set_env_var "$ENV_FILE" "REDIS_URL" "$redis_url"
     set_env_var "$ENV_FILE" "REDIS_NAMESPACE_PREFIX" "pasarguardbot:mainbot"
     set_env_var "$ENV_FILE" "TELETHON_SESSION_PATH" "sessions/KenzoSession"
     set_env_var "$ENV_FILE" "LOG_DIR" "./logs"
@@ -839,6 +973,7 @@ generate_env_file() {
     set_env_var "$ENV_FILE" "LOG_LEVEL" "INFO"
     append_mariadb_vars "$db_pass" "$db_root_pass"
     append_deploy_paths
+    set_install_mode "$install_mode"
 
     chmod 600 "$ENV_FILE"
 
@@ -1243,6 +1378,13 @@ action_docker_network_rollback() {
 }
 
 action_docker_network() {
+    if is_native_mode; then
+        draw_banner
+        warn "Docker network tools are only available for Docker installs."
+        pause
+        return 0
+    fi
+
     while true; do
         draw_banner
         echo -e "${C_BOLD}  Docker network${C_RESET}"
@@ -1307,10 +1449,511 @@ ensure_manager_command() {
     install_manager_command
 }
 
-# ── Actions ───────────────────────────────────────────────────────────────────
-action_install() {
-    draw_banner
-    info "Starting PasarguardBot installation..."
+# ── Native install (no Docker) ─────────────────────────────────────────────────
+find_mysqld_bin() {
+    local candidate
+    for candidate in mariadbd mysqld /usr/sbin/mariadbd /usr/sbin/mysqld; do
+        if command -v "$candidate" &>/dev/null; then
+            command -v "$candidate"
+            return 0
+        fi
+        if [[ -x "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_mariadb_install_db() {
+    local candidate
+    for candidate in mariadb-install-db mysql_install_db; do
+        if command -v "$candidate" &>/dev/null; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_native_packages() {
+    info "Installing native packages (isolated instances — system MariaDB/Redis defaults untouched)..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    run_pkg_install \
+        mariadb-server \
+        redis-server \
+        php-cli \
+        php-mysqli \
+        php-mbstring \
+        php-xml \
+        php-curl \
+        php-zip \
+        curl \
+        ca-certificates \
+        git \
+        tar \
+        build-essential \
+        libffi-dev \
+        libssl-dev \
+        pkg-config
+
+    # Leave any pre-existing system MariaDB/Redis services alone (they keep 3306/6379).
+    # PasarguardBot uses isolated instances on 6162/6161 only.
+    ok "Native packages ready."
+}
+
+write_native_redis_conf() {
+    cat >"${CONF_DIR}/redis.conf" <<EOF
+bind 127.0.0.1
+protected-mode yes
+port ${REDIS_PORT}
+daemonize no
+dir ${CONFIG_DIR}/data/redis
+pidfile ${RUN_DIR}/redis.pid
+logfile ""
+save 60 1
+loglevel warning
+dbfilename dump.rdb
+EOF
+}
+
+write_native_mariadb_conf() {
+    cat >"${CONF_DIR}/mariadb.cnf" <<EOF
+[mysqld]
+user=mysql
+port=${MARIADB_PORT}
+bind-address=127.0.0.1
+datadir=${CONFIG_DIR}/data/mariadb
+socket=${RUN_DIR}/mariadb.sock
+pid-file=${RUN_DIR}/mariadb.pid
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+skip-character-set-client-handshake
+skip-networking=0
+innodb_buffer_pool_size=128M
+
+[client]
+port=${MARIADB_PORT}
+socket=${RUN_DIR}/mariadb.sock
+EOF
+}
+
+write_native_systemd_units() {
+    local mysqld_bin uv_bin redis_bin
+    mysqld_bin="$(find_mysqld_bin)" || die "mysqld/mariadbd not found after package install."
+    uv_bin="$(command -v uv)" || die "uv not found after install."
+    redis_bin="$(command -v redis-server)" || die "redis-server not found after package install."
+
+    cat >/etc/systemd/system/pasarguardbot-redis.service <<EOF
+[Unit]
+Description=PasarguardBot Redis (isolated)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${redis_bin} ${CONF_DIR}/redis.conf
+Restart=on-failure
+RestartSec=3
+WorkingDirectory=${CONFIG_DIR}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat >/etc/systemd/system/pasarguardbot-mariadb.service <<EOF
+[Unit]
+Description=PasarguardBot MariaDB (isolated)
+After=network.target
+
+[Service]
+Type=simple
+User=mysql
+Group=mysql
+ExecStart=${mysqld_bin} --defaults-file=${CONF_DIR}/mariadb.cnf
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat >/etc/systemd/system/pasarguardbot-phpmyadmin.service <<EOF
+[Unit]
+Description=PasarguardBot phpMyAdmin
+After=network.target pasarguardbot-mariadb.service
+Wants=pasarguardbot-mariadb.service
+
+[Service]
+Type=simple
+WorkingDirectory=${PHPMYADMIN_DIR}
+ExecStart=/usr/bin/php -S 0.0.0.0:${PHPMYADMIN_PORT} -t ${PHPMYADMIN_DIR}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat >/etc/systemd/system/pasarguardbot.service <<EOF
+[Unit]
+Description=PasarguardBot
+After=network.target pasarguardbot-mariadb.service pasarguardbot-redis.service
+Wants=pasarguardbot-mariadb.service pasarguardbot-redis.service
+
+[Service]
+Type=simple
+WorkingDirectory=${APP_DIR}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-${ENV_FILE}
+ExecStartPre=${uv_bin} run alembic upgrade head
+ExecStart=${uv_bin} run main.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+}
+
+init_native_mariadb_datadir() {
+    local install_db
+    mkdir -p "${CONFIG_DIR}/data/mariadb" "$RUN_DIR"
+    chmod 1777 "$RUN_DIR" 2>/dev/null || chmod 755 "$RUN_DIR"
+
+    if [[ -d "${CONFIG_DIR}/data/mariadb/mysql" ]]; then
+        chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
+        ok "MariaDB datadir already initialized."
+        return 0
+    fi
+
+    install_db="$(find_mariadb_install_db)" || die "mariadb-install-db not found."
+    info "Initializing isolated MariaDB datadir..."
+    chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
+    if ! "$install_db" --user=mysql --datadir="${CONFIG_DIR}/data/mariadb" >/dev/null 2>&1; then
+        # Fallback used on some MariaDB packages.
+        "$install_db" --user=mysql --basedir=/usr --datadir="${CONFIG_DIR}/data/mariadb" >/dev/null \
+            || die "Failed to initialize MariaDB datadir."
+    fi
+    chown -R mysql:mysql "${CONFIG_DIR}/data/mariadb"
+    ok "MariaDB datadir initialized."
+}
+
+wait_for_native_mariadb() {
+    local i=0
+    local max=60
+    local root_pass
+    root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
+    info "Waiting for isolated MariaDB on port ${MARIADB_PORT}..."
+    while (( i < max )); do
+        if command -v mariadb &>/dev/null; then
+            if mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null; then
+                ok "MariaDB is ready."
+                return 0
+            fi
+            if [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
+                ok "MariaDB is ready."
+                return 0
+            fi
+        elif command -v mysql &>/dev/null; then
+            if mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "SELECT 1" &>/dev/null; then
+                ok "MariaDB is ready."
+                return 0
+            fi
+            if [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
+                ok "MariaDB is ready."
+                return 0
+            fi
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    die "Isolated MariaDB did not become ready. Check: journalctl -u pasarguardbot-mariadb -n 50"
+}
+
+mariadb_admin_cli() {
+    local root_pass
+    root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
+    if command -v mariadb &>/dev/null; then
+        if [[ -n "$root_pass" ]] && mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
+            mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" "$@"
+            return
+        fi
+        mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root "$@"
+    else
+        if [[ -n "$root_pass" ]] && mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" -e "SELECT 1" &>/dev/null; then
+            mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${root_pass}" "$@"
+            return
+        fi
+        mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root "$@"
+    fi
+}
+
+setup_native_mariadb_user() {
+    local db_pass db_root_pass
+    db_pass="$(get_env_value "MARIADB_PASSWORD")"
+    db_root_pass="$(get_env_value "MARIADB_ROOT_PASSWORD")"
+    [[ -n "$db_pass" ]] || die "MARIADB_PASSWORD missing from .env"
+    [[ -n "$db_root_pass" ]] || die "MARIADB_ROOT_PASSWORD missing from .env"
+
+    info "Creating PasarguardBot database and user..."
+    # Compatible with MariaDB versions that lack CREATE USER IF NOT EXISTS.
+    mariadb_admin_cli <<SQL
+CREATE DATABASE IF NOT EXISTS pasarguardbot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
+GRANT ALL PRIVILEGES ON pasarguardbot.* TO 'pasarguardbot'@'localhost' IDENTIFIED BY '${db_pass}';
+FLUSH PRIVILEGES;
+SQL
+    # Set root password last so earlier statements can connect without it on first boot.
+    if command -v mariadb &>/dev/null; then
+        mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_root_pass}'; FLUSH PRIVILEGES;" 2>/dev/null \
+            || mariadb --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${db_root_pass}" -e "SELECT 1" &>/dev/null \
+            || warn "Could not set/verify MariaDB root password (may already be configured)."
+    else
+        mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_root_pass}'; FLUSH PRIVILEGES;" 2>/dev/null \
+            || mysql --defaults-file="${CONF_DIR}/mariadb.cnf" -u root -p"${db_root_pass}" -e "SELECT 1" &>/dev/null \
+            || warn "Could not set/verify MariaDB root password (may already be configured)."
+    fi
+    ok "Database user ready."
+}
+
+install_phpmyadmin_files() {
+    local tmp tmpdir
+    if [[ -f "${PHPMYADMIN_DIR}/index.php" ]]; then
+        ok "phpMyAdmin already present."
+        return 0
+    fi
+
+    info "Downloading phpMyAdmin..."
+    tmp="$(mktemp)"
+    tmpdir="$(mktemp -d)"
+    if ! curl_download "$PHPMYADMIN_ARCHIVE_URL" "$tmp"; then
+        rm -f "$tmp"
+        rm -rf "$tmpdir"
+        explain_network_failure "download phpMyAdmin"
+        exit 1
+    fi
+    tar -xzf "$tmp" -C "$tmpdir"
+    mkdir -p "$PHPMYADMIN_DIR"
+    rm -rf "${PHPMYADMIN_DIR:?}/"*
+    mv "$tmpdir"/phpMyAdmin-*-all-languages/* "$PHPMYADMIN_DIR"/
+    rm -f "$tmp"
+    rm -rf "$tmpdir"
+
+    cat >"${PHPMYADMIN_DIR}/config.inc.php" <<EOF
+<?php
+\$cfg['blowfish_secret'] = '$(rand_hex 16)$(rand_hex 16)';
+\$i = 0;
+\$i++;
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['port'] = '${MARIADB_PORT}';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+\$cfg['UploadDir'] = '';
+\$cfg['SaveDir'] = '';
+EOF
+    ok "phpMyAdmin installed at ${PHPMYADMIN_DIR}"
+}
+
+install_uv_binary() {
+    if command -v uv &>/dev/null; then
+        ok "uv already installed: $(uv --version 2>/dev/null | head -1)"
+        return 0
+    fi
+    info "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+    hash -r 2>/dev/null || true
+    if ! command -v uv &>/dev/null && [[ -x /root/.local/bin/uv ]]; then
+        ln -sf /root/.local/bin/uv /usr/local/bin/uv
+    fi
+    if ! command -v uv &>/dev/null && [[ -x "${HOME}/.local/bin/uv" ]]; then
+        ln -sf "${HOME}/.local/bin/uv" /usr/local/bin/uv
+    fi
+    command -v uv &>/dev/null || die "uv install failed."
+    ok "uv installed."
+}
+
+fetch_bot_source() {
+    local tmp tmpdir force_refresh="${1:-0}"
+    ensure_config_dirs
+
+    if [[ "$force_refresh" == "1" ]] && [[ -d "${APP_DIR}/.git" ]]; then
+        info "Updating existing git checkout in ${APP_DIR}..."
+        git -C "$APP_DIR" fetch --depth 1 origin main
+        git -C "$APP_DIR" reset --hard origin/main
+        ok "Source updated."
+        return 0
+    fi
+
+    if [[ "$force_refresh" == "1" ]] && [[ -f "${APP_DIR}/main.py" ]]; then
+        info "Refreshing bot source from GitHub archive..."
+        tmp="$(mktemp)"
+        tmpdir="$(mktemp -d)"
+        if ! curl_download "$REPO_ARCHIVE_URL" "$tmp"; then
+            rm -f "$tmp"
+            rm -rf "$tmpdir"
+            explain_network_failure "download bot source archive"
+            exit 1
+        fi
+        tar -xzf "$tmp" -C "$tmpdir"
+        # Preserve local venv / uv cache if present.
+        rm -rf "${APP_DIR}.bak"
+        mv "$APP_DIR" "${APP_DIR}.bak"
+        mv "$tmpdir"/PasarguardBot-main "$APP_DIR"
+        if [[ -d "${APP_DIR}.bak/.venv" ]]; then
+            mv "${APP_DIR}.bak/.venv" "${APP_DIR}/.venv"
+        fi
+        rm -rf "${APP_DIR}.bak" "$tmpdir"
+        rm -f "$tmp"
+        ok "Source refreshed at ${APP_DIR}"
+        return 0
+    fi
+
+    if [[ -d "${APP_DIR}/.git" ]]; then
+        info "Updating existing git checkout in ${APP_DIR}..."
+        git -C "$APP_DIR" fetch --depth 1 origin main
+        git -C "$APP_DIR" reset --hard origin/main
+        ok "Source updated."
+        return 0
+    fi
+
+    if [[ -f "${APP_DIR}/main.py" && -f "${APP_DIR}/pyproject.toml" ]]; then
+        ok "App source already present at ${APP_DIR}"
+        return 0
+    fi
+
+    info "Downloading bot source from GitHub..."
+    rm -rf "${APP_DIR}"
+    mkdir -p "$(dirname "$APP_DIR")"
+
+    if command -v git &>/dev/null && git clone --depth 1 --branch main "$REPO_GIT_URL" "$APP_DIR"; then
+        ok "Cloned repository to ${APP_DIR}"
+        return 0
+    fi
+
+    warn "git clone failed — falling back to source tarball."
+    tmp="$(mktemp)"
+    tmpdir="$(mktemp -d)"
+    if ! curl_download "$REPO_ARCHIVE_URL" "$tmp"; then
+        rm -f "$tmp"
+        rm -rf "$tmpdir"
+        explain_network_failure "download bot source archive"
+        exit 1
+    fi
+    tar -xzf "$tmp" -C "$tmpdir"
+    mv "$tmpdir"/PasarguardBot-main "$APP_DIR"
+    rm -f "$tmp"
+    rm -rf "$tmpdir"
+    ok "Source extracted to ${APP_DIR}"
+}
+
+link_native_app_paths() {
+    ln -sfn "$ENV_FILE" "${APP_DIR}/.env"
+    ln -sfn "${CONFIG_DIR}/logs" "${APP_DIR}/logs"
+    ln -sfn "${CONFIG_DIR}/sessions" "${APP_DIR}/sessions"
+}
+
+sync_native_python_deps() {
+    info "Installing Python 3.14 and project dependencies with uv..."
+    (
+        cd "$APP_DIR"
+        uv python install 3.14
+        if [[ -f uv.lock ]]; then
+            uv sync --frozen --no-dev
+        else
+            uv sync --no-dev
+        fi
+    ) || die "uv sync failed."
+    ok "Python dependencies ready."
+}
+
+native_systemctl() {
+    systemctl "$@"
+}
+
+start_native_services() {
+    info "Starting native systemd services..."
+    native_systemctl enable --now pasarguardbot-redis.service
+    native_systemctl enable --now pasarguardbot-mariadb.service
+    wait_for_native_mariadb
+    setup_native_mariadb_user
+    native_systemctl enable --now pasarguardbot-phpmyadmin.service
+    native_systemctl enable --now pasarguardbot.service
+    ok "Native services started."
+}
+
+stop_native_services() {
+    local unit
+    for unit in pasarguardbot.service pasarguardbot-phpmyadmin.service pasarguardbot-mariadb.service pasarguardbot-redis.service; do
+        native_systemctl stop "$unit" 2>/dev/null || true
+        native_systemctl disable "$unit" 2>/dev/null || true
+    done
+}
+
+remove_native_systemd_units() {
+    local unit
+    stop_native_services
+    for unit in "${NATIVE_UNITS[@]}"; do
+        rm -f "/etc/systemd/system/${unit}"
+    done
+    systemctl daemon-reload 2>/dev/null || true
+}
+
+wait_for_native_bot() {
+    local i=0
+    local max=90
+    info "Waiting for bot service..."
+    while (( i < max )); do
+        if systemctl is-active --quiet pasarguardbot.service; then
+            ok "Bot service is active."
+            return 0
+        fi
+        if systemctl is-failed --quiet pasarguardbot.service; then
+            warn "Bot service failed. Recent logs:"
+            journalctl -u pasarguardbot -n 40 --no-pager || true
+            return 1
+        fi
+        sleep 2
+        i=$((i + 2))
+    done
+    warn "Timed out waiting for bot service."
+    systemctl status pasarguardbot --no-pager || true
+    return 1
+}
+
+show_native_install_summary() {
+    echo
+    ok "Installation completed successfully (native)!"
+    echo
+    info "Paths:"
+    echo -e "  ${C_DIM}Config:${C_RESET}  ${CONFIG_DIR}"
+    echo -e "  ${C_DIM}.env:${C_RESET}    ${ENV_FILE}"
+    echo -e "  ${C_DIM}App:${C_RESET}     ${APP_DIR}"
+    echo -e "  ${C_DIM}Logs:${C_RESET}    ${CONFIG_DIR}/logs"
+    echo -e "  ${C_DIM}Data:${C_RESET}    ${CONFIG_DIR}/data"
+    echo
+    info "Version:"
+    echo -e "  ${C_DIM}Bot:${C_RESET}  $(get_installed_bot_version)"
+    echo
+    info "Ports:"
+    echo -e "  ${C_DIM}FastAPI:${C_RESET}      ${FASTAPI_PORT_DEFAULT} (public)"
+    echo -e "  ${C_DIM}phpMyAdmin:${C_RESET}   ${PHPMYADMIN_PORT} (public)"
+    echo -e "  ${C_DIM}Redis:${C_RESET}        ${REDIS_PORT} (localhost only)"
+    echo -e "  ${C_DIM}MariaDB:${C_RESET}      ${MARIADB_PORT} (localhost only)"
+    show_service_urls
+    echo
+    info "Commands:"
+    echo -e "  ${C_DIM}Manage:${C_RESET}   pasarguardbot"
+    echo -e "  ${C_DIM}Status:${C_RESET}   pasarguardbot → option 7"
+}
+
+action_install_docker() {
+    info "Starting PasarguardBot Docker installation..."
     echo
 
     if is_installed; then
@@ -1321,9 +1964,9 @@ action_install() {
 
     check_disk_space
     install_docker
-    check_required_ports
+    check_required_ports docker
     ensure_config_dirs
-    generate_env_file
+    generate_env_file docker
     setup_compose
     install_manager_command
     cleanup_stale_named_containers
@@ -1336,9 +1979,10 @@ action_install() {
     fi
 
     wait_for_containers_healthy || true
+    set_install_mode docker
 
     echo
-    ok "Installation completed successfully!"
+    ok "Installation completed successfully (docker)!"
     echo
     info "Paths:"
     echo -e "  ${C_DIM}Config:${C_RESET}  ${CONFIG_DIR}"
@@ -1350,10 +1994,10 @@ action_install() {
     echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:${BOT_IMAGE_TAG} ($(get_installed_bot_version))"
     echo
     info "Ports:"
-    echo -e "  ${C_DIM}FastAPI:${C_RESET}      6160 (public)"
-    echo -e "  ${C_DIM}phpMyAdmin:${C_RESET}   6163 (public)"
-    echo -e "  ${C_DIM}Redis:${C_RESET}        6161 (localhost only)"
-    echo -e "  ${C_DIM}MariaDB:${C_RESET}      6162 (localhost only)"
+    echo -e "  ${C_DIM}FastAPI:${C_RESET}      ${FASTAPI_PORT_DEFAULT} (public)"
+    echo -e "  ${C_DIM}phpMyAdmin:${C_RESET}   ${PHPMYADMIN_PORT} (public)"
+    echo -e "  ${C_DIM}Redis:${C_RESET}        ${REDIS_PORT} (localhost only)"
+    echo -e "  ${C_DIM}MariaDB:${C_RESET}      ${MARIADB_PORT} (localhost only)"
     show_service_urls
     echo
     info "Commands:"
@@ -1362,15 +2006,61 @@ action_install() {
     pause
 }
 
-action_uninstall() {
-    draw_banner
-    if ! is_installed && [[ ! -d "$CONFIG_DIR" ]]; then
-        warn "Bot is not installed."
-        pause
-        return 0
+action_install_native() {
+    info "Starting PasarguardBot native installation (no Docker)..."
+    echo
+    require_native_os
+
+    if is_installed; then
+        warn "Bot appears already installed (${CONFIG_DIR})."
+        read -r -p "Continue (will keep existing .env and data)? (y/N): " confirm || true
+        [[ "${confirm,,}" == "y" ]] || return 0
     fi
 
-    echo -e "${C_RED}${C_BOLD}  ⚠  Uninstall PasarguardBot${C_RESET}"
+    check_disk_space
+    check_required_ports native
+    ensure_config_dirs
+    install_native_packages
+    generate_env_file native
+    write_native_redis_conf
+    write_native_mariadb_conf
+    init_native_mariadb_datadir
+    install_phpmyadmin_files
+    install_uv_binary
+    fetch_bot_source
+    link_native_app_paths
+    sync_native_python_deps
+    write_native_systemd_units
+    install_manager_command
+    start_native_services
+    wait_for_native_bot || true
+    set_install_mode native
+    show_native_install_summary
+    pause
+}
+
+# ── Actions ───────────────────────────────────────────────────────────────────
+action_install() {
+    draw_banner
+    echo -e "${C_BOLD}  Install mode${C_RESET}"
+    echo
+    echo "  1) Docker (full stack — Redis/MariaDB/phpMyAdmin/bot in containers)"
+    echo "  2) Native (no Docker — services on host, isolated ports ${REDIS_PORT}/${MARIADB_PORT}/${PHPMYADMIN_PORT})"
+    echo "  0) Cancel"
+    echo
+    read -r -p "Choice: " choice || return 0
+
+    case "$choice" in
+        1) action_install_docker ;;
+        2) action_install_native ;;
+        0) info "Cancelled." ;;
+        *) warn "Invalid choice." ; sleep 1 ;;
+    esac
+}
+
+action_uninstall_docker() {
+    local choice confirm img_id
+    echo -e "${C_RED}${C_BOLD}  ⚠  Uninstall PasarguardBot (Docker)${C_RESET}"
     echo
     echo "  1) Remove containers only (keep .env and data)"
     echo "  2) Remove containers + data (keep .env / config if present)"
@@ -1393,7 +2083,6 @@ action_uninstall() {
             read -r -p "Delete database/redis data under ${CONFIG_DIR}/data? Type 'yes' to confirm: " confirm || true
             [[ "$confirm" == "yes" ]] || {
                 info "Cancelled."
-                pause
                 return 0
             }
             if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
@@ -1408,7 +2097,6 @@ action_uninstall() {
             read -r -p "Everything under ${CONFIG_DIR} will be deleted! Type 'yes' to confirm: " confirm || true
             [[ "$confirm" == "yes" ]] || {
                 info "Cancelled."
-                pause
                 return 0
             }
             if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
@@ -1427,14 +2115,77 @@ action_uninstall() {
             info "Cancelled."
             ;;
     esac
+}
+
+action_uninstall_native() {
+    local choice confirm
+    echo -e "${C_RED}${C_BOLD}  ⚠  Uninstall PasarguardBot (Native)${C_RESET}"
+    echo
+    echo "  1) Stop services only (keep .env, app, and data)"
+    echo "  2) Stop services + delete data (keep .env / app / config)"
+    echo "  3) Full remove (${CONFIG_DIR}, systemd units, and ${MANAGER_BIN})"
+    echo "  0) Cancel"
+    echo
+    read -r -p "Choice: " choice || true
+
+    case "$choice" in
+        1)
+            info "Stopping native services..."
+            stop_native_services
+            ok "Services stopped. .env, app, and data were kept."
+            ;;
+        2)
+            read -r -p "Delete database/redis data under ${CONFIG_DIR}/data? Type 'yes' to confirm: " confirm || true
+            [[ "$confirm" == "yes" ]] || {
+                info "Cancelled."
+                return 0
+            }
+            stop_native_services
+            rm -rf "${CONFIG_DIR}/data"
+            mkdir -p "${CONFIG_DIR}/data/mariadb" "${CONFIG_DIR}/data/redis"
+            ok "Services stopped and data removed. Config/.env/app kept if present."
+            ;;
+        3)
+            read -r -p "Everything under ${CONFIG_DIR} will be deleted! Type 'yes' to confirm: " confirm || true
+            [[ "$confirm" == "yes" ]] || {
+                info "Cancelled."
+                return 0
+            }
+            remove_native_systemd_units
+            rm -rf "$CONFIG_DIR"
+            rm -f "$MANAGER_BIN"
+            ok "All PasarguardBot native files and units removed."
+            info "System MariaDB/Redis packages (if any) were left installed but untouched."
+            ;;
+        *)
+            info "Cancelled."
+            ;;
+    esac
+}
+
+action_uninstall() {
+    local mode
+    draw_banner
+    if ! is_installed && [[ ! -d "$CONFIG_DIR" ]]; then
+        warn "Bot is not installed."
+        pause
+        return 0
+    fi
+
+    mode="$(get_install_mode)"
+    case "$mode" in
+        native) action_uninstall_native ;;
+        docker|"") action_uninstall_docker ;;
+        *)
+            warn "Unknown install mode '${mode}'. Showing both uninstall menus is not supported; defaulting to Docker path."
+            action_uninstall_docker
+            ;;
+    esac
     pause
 }
 
-action_update() {
+action_update_docker() {
     local old_ver new_ver
-
-    draw_banner
-    is_installed || die "Install the bot first (option 1)."
     command -v docker &>/dev/null || die "Docker is not installed."
     docker info &>/dev/null || die "Docker daemon is not running."
 
@@ -1454,6 +2205,40 @@ action_update() {
 
     new_ver="$(get_installed_bot_version)"
     ok "Update complete (${old_ver} → ${new_ver})."
+}
+
+action_update_native() {
+    local old_ver new_ver
+    require_native_os
+    [[ -d "$APP_DIR" ]] || die "Native app directory missing: ${APP_DIR}"
+
+    old_ver="$(get_installed_bot_version)"
+    info "Updating bot source and dependencies..."
+    fetch_bot_source 1
+    link_native_app_paths
+    sync_native_python_deps
+    write_native_systemd_units
+
+    info "Restarting native services..."
+    native_systemctl restart pasarguardbot-redis.service || true
+    native_systemctl restart pasarguardbot-mariadb.service || true
+    native_systemctl restart pasarguardbot-phpmyadmin.service || true
+    native_systemctl restart pasarguardbot.service
+    wait_for_native_bot || true
+
+    new_ver="$(get_installed_bot_version)"
+    ok "Update complete (${old_ver} → ${new_ver})."
+}
+
+action_update() {
+    draw_banner
+    is_installed || die "Install the bot first (option 1)."
+
+    case "$(get_install_mode)" in
+        native) action_update_native ;;
+        docker) action_update_docker ;;
+        *) die "Unknown install mode. Reinstall or set ${INSTALL_MODE_FILE}." ;;
+    esac
     pause
 }
 
@@ -1505,10 +2290,16 @@ compose_running_services() {
 }
 
 action_logs_live() {
+    is_installed || die "Install the bot first (option 1)."
+
+    if is_native_mode; then
+        info "Live bot logs — press Ctrl+C to exit"
+        journalctl -u pasarguardbot -f -n 200
+        return 0
+    fi
+
     local -a services=()
     local svc
-
-    is_installed || die "Install the bot first (option 1)."
 
     while IFS= read -r svc; do
         [[ -n "$svc" ]] && services+=("$svc")
@@ -1526,6 +2317,31 @@ action_logs_live() {
 action_logs() {
     draw_banner
     is_installed || die "Install the bot first (option 1)."
+
+    if is_native_mode; then
+        echo "  1) Bot logs"
+        echo "  2) MariaDB logs"
+        echo "  3) Redis logs"
+        echo "  4) phpMyAdmin logs"
+        echo "  5) Live bot logs (Ctrl+C to exit)"
+        echo "  0) Back"
+        echo
+        read -r -p "Choice: " choice || true
+        case "$choice" in
+            1) journalctl -u pasarguardbot -n 200 --no-pager ;;
+            2) journalctl -u pasarguardbot-mariadb -n 200 --no-pager ;;
+            3) journalctl -u pasarguardbot-redis -n 200 --no-pager ;;
+            4) journalctl -u pasarguardbot-phpmyadmin -n 200 --no-pager ;;
+            5)
+                info "Live logs — press Ctrl+C to exit"
+                journalctl -u pasarguardbot -f -n 200
+                ;;
+            0) return 0 ;;
+            *) warn "Invalid choice." ;;
+        esac
+        pause
+        return 0
+    fi
 
     echo "  1) Bot logs"
     echo "  2) MariaDB logs"
@@ -1571,6 +2387,14 @@ action_edit_env() {
 }
 
 action_restart_quiet() {
+    if is_native_mode; then
+        native_systemctl restart pasarguardbot-redis.service || true
+        native_systemctl restart pasarguardbot-mariadb.service || true
+        native_systemctl restart pasarguardbot-phpmyadmin.service || true
+        native_systemctl restart pasarguardbot.service
+        ok "Full restart completed (native)."
+        return 0
+    fi
     docker_compose pull bot || true
     docker_compose down
     docker_compose up -d
@@ -1587,8 +2411,23 @@ action_restart() {
 }
 
 action_status() {
+    local unit
     draw_banner
     is_installed || die "Install the bot first (option 1)."
+
+    if is_native_mode; then
+        info "Systemd status:"
+        echo
+        for unit in "${NATIVE_UNITS[@]}"; do
+            printf '  %-32s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || echo missing)"
+        done
+        echo
+        info "Listening ports (expected ${FASTAPI_PORT_DEFAULT}/${REDIS_PORT}/${MARIADB_PORT}/${PHPMYADMIN_PORT}):"
+        ss -ltn 2>/dev/null | grep -E ":(${FASTAPI_PORT_DEFAULT}|${REDIS_PORT}|${MARIADB_PORT}|${PHPMYADMIN_PORT})\\s" || true
+        show_service_urls
+        pause
+        return 0
+    fi
 
     info "Container status:"
     echo
