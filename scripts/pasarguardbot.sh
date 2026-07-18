@@ -2,19 +2,18 @@
 # PasarguardBot — install & management script (Docker + Native)
 # https://github.com/AmirKenzo/PasarguardBot
 #
-# Install (main):
+# Install:
 #   bash <(curl -fsSL https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/main/scripts/pasarguardbot.sh)
-# Install (dev / no cache):
-#   PASARGUARDBOT_BRANCH=dev bash <(curl -fsSL "https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/dev/scripts/pasarguardbot.sh?$(date +%s)")
-
+# Then choose Docker/Native and main (stable) or dev (testing).
 set -euo pipefail
 
 # ── Paths & constants ──────────────────────────────────────────────────────────
-readonly SCRIPT_VERSION="1.2.9"
+readonly SCRIPT_VERSION="1.2.12"
 readonly CONFIG_DIR="/opt/pasarguardbot"
 readonly COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yml"
 readonly ENV_FILE="${CONFIG_DIR}/.env"
 readonly INSTALL_MODE_FILE="${CONFIG_DIR}/.install_mode"
+readonly INSTALL_BRANCH_FILE="${CONFIG_DIR}/.install_branch"
 readonly APP_DIR="${CONFIG_DIR}/app"
 readonly CONF_DIR="${CONFIG_DIR}/conf"
 readonly RUN_DIR="${CONFIG_DIR}/run"
@@ -22,7 +21,8 @@ readonly PHPMYADMIN_DIR="${CONFIG_DIR}/phpmyadmin"
 readonly MANAGER_BIN="/usr/local/bin/pasarguardbot"
 readonly MANAGER_SCRIPT="${CONFIG_DIR}/pasarguardbot.sh"
 # Override while testing: PASARGUARDBOT_BRANCH=dev
-readonly REPO_BRANCH="${PASARGUARDBOT_BRANCH:-main}"
+readonly DEFAULT_REPO_BRANCH="${PASARGUARDBOT_BRANCH:-main}"
+readonly REPO_BRANCH="${DEFAULT_REPO_BRANCH}"
 readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/scripts/pasarguardbot.sh"
 readonly NETPLAN_FIX_SCRIPT_NAME="fix-docker-netplan.sh"
 readonly NETPLAN_FIX_INSTALLED="${CONFIG_DIR}/${NETPLAN_FIX_SCRIPT_NAME}"
@@ -30,7 +30,6 @@ readonly NETPLAN_FIX_RAW_URL="${SCRIPT_RAW_URL/pasarguardbot.sh/${NETPLAN_FIX_SC
 readonly COMPOSE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/docker-compose.yml"
 readonly ENV_EXAMPLE_RAW_URL="https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/${REPO_BRANCH}/.env.example"
 readonly REPO_GIT_URL="https://github.com/AmirKenzo/PasarguardBot.git"
-readonly REPO_ARCHIVE_URL="https://github.com/AmirKenzo/PasarguardBot/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 readonly PHPMYADMIN_ARCHIVE_URL="https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz"
 readonly BOT_IMAGE="ghcr.io/amirkenzo/pasarguardbot"
 readonly BOT_IMAGE_TAG="latest"
@@ -195,6 +194,95 @@ set_install_mode() {
     local mode="$1"
     mkdir -p "$CONFIG_DIR"
     printf '%s\n' "$mode" >"$INSTALL_MODE_FILE"
+}
+
+set_install_branch() {
+    local branch="$1"
+    mkdir -p "$CONFIG_DIR"
+    printf '%s\n' "$branch" >"$INSTALL_BRANCH_FILE"
+}
+
+# Resolve update/install branch: env > saved file > current git branch > default.
+get_repo_branch() {
+    local branch=""
+    if [[ -n "${PASARGUARDBOT_BRANCH:-}" ]]; then
+        printf '%s' "$PASARGUARDBOT_BRANCH"
+        return 0
+    fi
+    if [[ -f "$INSTALL_BRANCH_FILE" ]]; then
+        branch="$(tr -d '[:space:]' <"$INSTALL_BRANCH_FILE" 2>/dev/null || true)"
+        if [[ -n "$branch" ]]; then
+            printf '%s' "$branch"
+            return 0
+        fi
+    fi
+    if [[ -d "${APP_DIR}/.git" ]]; then
+        branch="$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        if [[ -n "$branch" && "$branch" != "HEAD" ]]; then
+            printf '%s' "$branch"
+            return 0
+        fi
+    fi
+    printf '%s' "$DEFAULT_REPO_BRANCH"
+}
+
+repo_archive_url() {
+    local branch="${1:-$(get_repo_branch)}"
+    printf 'https://github.com/AmirKenzo/PasarguardBot/archive/refs/heads/%s.tar.gz' "$branch"
+}
+
+compose_raw_url_for_branch() {
+    local branch="${1:-$(get_repo_branch)}"
+    printf 'https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/%s/docker-compose.yml' "$branch"
+}
+
+env_example_raw_url_for_branch() {
+    local branch="${1:-$(get_repo_branch)}"
+    printf 'https://raw.githubusercontent.com/AmirKenzo/PasarguardBot/%s/.env.example' "$branch"
+}
+
+# Sets SELECTED_REPO_BRANCH. Returns 1 if cancelled/invalid.
+# $1 = context label: install | update
+prompt_repo_branch() {
+    local context="${1:-update}"
+    local current choice title
+    SELECTED_REPO_BRANCH=""
+    current="$(get_repo_branch)"
+
+    if [[ "$context" == "install" ]]; then
+        title="Select install branch"
+    else
+        title="Select update branch"
+    fi
+
+    echo -e "${C_BOLD}  ${title}${C_RESET}"
+    echo
+    echo "  1) main  (recommended — latest stable)"
+    echo "  2) dev   (testing only — may be unstable)"
+    echo "  0) Cancel"
+    echo
+    if [[ -n "$current" && -f "$INSTALL_BRANCH_FILE" ]]; then
+        info "Last used branch: ${current}"
+    fi
+    read -r -p "Choice [1]: " choice || true
+    choice="${choice:-1}"
+    case "$choice" in
+        1)
+            SELECTED_REPO_BRANCH="main"
+            ;;
+        2)
+            warn "dev is for testing. Prefer main unless you need unreleased changes."
+            SELECTED_REPO_BRANCH="dev"
+            ;;
+        0)
+            return 1
+            ;;
+        *)
+            warn "Invalid choice."
+            return 1
+            ;;
+    esac
+    return 0
 }
 
 get_install_mode() {
@@ -930,6 +1018,7 @@ show_install_info() {
         fastapi_port="${fastapi_port:-$FASTAPI_PORT_DEFAULT}"
 
         echo -e "  ${C_DIM}Install mode:${C_RESET}    ${mode:-unknown}"
+        echo -e "  ${C_DIM}Branch:${C_RESET}         $(get_repo_branch)"
         echo -e "  ${C_DIM}Bot version:${C_RESET}     ${installed_ver}"
         echo -e "  ${C_DIM}Bot runtime:${C_RESET}     ${bot_runtime}"
         echo -e "  ${C_DIM}API port:${C_RESET}        ${fastapi_port}"
@@ -1016,22 +1105,25 @@ append_deploy_paths() {
 
 generate_env_file() {
     local install_mode="${1:-docker}"
+    local branch="${2:-$(get_repo_branch)}"
     local api_id api_hash bot_token admin_id
     local db_pass db_root_pass webhook_secret crypto_key
-    local tmp db_host redis_url
+    local tmp db_host redis_url env_url
 
     if [[ -f "$ENV_FILE" ]]; then
         warn ".env already exists — keeping the existing file."
         chmod 600 "$ENV_FILE" 2>/dev/null || true
         set_install_mode "$install_mode"
+        set_install_branch "$branch"
         return 0
     fi
 
     ensure_config_dirs
+    env_url="$(env_example_raw_url_for_branch "$branch")"
 
     tmp="$(mktemp)"
-    info "Downloading .env.example from GitHub..."
-    if ! curl_download "$ENV_EXAMPLE_RAW_URL" "$tmp"; then
+    info "Downloading .env.example from GitHub (${branch})..."
+    if ! curl_download "$env_url" "$tmp"; then
         rm -f "$tmp"
         explain_network_failure "download .env.example"
         exit 1
@@ -1082,6 +1174,7 @@ generate_env_file() {
     append_mariadb_vars "$db_pass" "$db_root_pass"
     append_deploy_paths
     set_install_mode "$install_mode"
+    set_install_branch "$branch"
 
     chmod 600 "$ENV_FILE"
 
@@ -1115,12 +1208,15 @@ validate_compose_file() {
 
 setup_compose() {
     local tmp
+    local branch="${1:-$(get_repo_branch)}"
+    local compose_url
 
     ensure_config_dirs
     tmp="$(mktemp)"
+    compose_url="$(compose_raw_url_for_branch "$branch")"
 
-    info "Downloading production docker-compose.yml from GitHub..."
-    if ! curl_download "$COMPOSE_RAW_URL" "$tmp"; then
+    info "Downloading production docker-compose.yml from GitHub (${branch})..."
+    if ! curl_download "$compose_url" "$tmp"; then
         rm -f "$tmp"
         explain_network_failure "download docker-compose.yml"
         exit 1
@@ -1900,22 +1996,34 @@ install_uv_binary() {
 }
 
 fetch_bot_source() {
-    local tmp tmpdir force_refresh="${1:-0}" extracted=""
+    local tmp tmpdir force_refresh="${1:-0}" branch="${2:-}" extracted="" archive_url
+    if [[ -z "$branch" ]]; then
+        branch="$(get_repo_branch)"
+    fi
+    archive_url="$(repo_archive_url "$branch")"
     ensure_config_dirs
 
     if [[ "$force_refresh" == "1" ]] && [[ -d "${APP_DIR}/.git" ]]; then
-        info "Updating existing git checkout in ${APP_DIR} (branch ${REPO_BRANCH})..."
-        git -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-        git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
-        ok "Source updated."
+        info "Updating existing git checkout in ${APP_DIR} (branch ${branch})..."
+        git -C "$APP_DIR" remote set-url origin "$REPO_GIT_URL" 2>/dev/null || true
+        git -C "$APP_DIR" fetch --depth 1 origin "$branch" \
+            || die "git fetch origin ${branch} failed."
+        # Shallow fetch may only update FETCH_HEAD (origin/<branch> can be missing).
+        if git -C "$APP_DIR" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
+            git -C "$APP_DIR" checkout -B "$branch" "origin/${branch}"
+        else
+            git -C "$APP_DIR" checkout -B "$branch" FETCH_HEAD
+        fi
+        set_install_branch "$branch"
+        ok "Source updated ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))."
         return 0
     fi
 
     if [[ "$force_refresh" == "1" ]] && [[ -f "${APP_DIR}/main.py" ]]; then
-        info "Refreshing bot source from GitHub archive (${REPO_BRANCH})..."
+        info "Refreshing bot source from GitHub archive (${branch})..."
         tmp="$(mktemp)"
         tmpdir="$(mktemp -d)"
-        if ! curl_download "$REPO_ARCHIVE_URL" "$tmp"; then
+        if ! curl_download "$archive_url" "$tmp"; then
             rm -f "$tmp"
             rm -rf "$tmpdir"
             explain_network_failure "download bot source archive"
@@ -1933,28 +2041,38 @@ fetch_bot_source() {
         fi
         rm -rf "${APP_DIR}.bak" "$tmpdir"
         rm -f "$tmp"
+        set_install_branch "$branch"
         ok "Source refreshed at ${APP_DIR}"
         return 0
     fi
 
     if [[ -d "${APP_DIR}/.git" ]]; then
-        info "Updating existing git checkout in ${APP_DIR} (branch ${REPO_BRANCH})..."
-        git -C "$APP_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-        git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
-        ok "Source updated."
+        info "Updating existing git checkout in ${APP_DIR} (branch ${branch})..."
+        git -C "$APP_DIR" remote set-url origin "$REPO_GIT_URL" 2>/dev/null || true
+        git -C "$APP_DIR" fetch --depth 1 origin "$branch" \
+            || die "git fetch origin ${branch} failed."
+        if git -C "$APP_DIR" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
+            git -C "$APP_DIR" checkout -B "$branch" "origin/${branch}"
+        else
+            git -C "$APP_DIR" checkout -B "$branch" FETCH_HEAD
+        fi
+        set_install_branch "$branch"
+        ok "Source updated ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))."
         return 0
     fi
 
     if [[ -f "${APP_DIR}/main.py" && -f "${APP_DIR}/pyproject.toml" ]]; then
         ok "App source already present at ${APP_DIR}"
+        set_install_branch "$branch"
         return 0
     fi
 
-    info "Downloading bot source from GitHub (${REPO_BRANCH})..."
+    info "Downloading bot source from GitHub (${branch})..."
     rm -rf "${APP_DIR}"
     mkdir -p "$(dirname "$APP_DIR")"
 
-    if command -v git &>/dev/null && git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_GIT_URL" "$APP_DIR"; then
+    if command -v git &>/dev/null && git clone --depth 1 --branch "$branch" "$REPO_GIT_URL" "$APP_DIR"; then
+        set_install_branch "$branch"
         ok "Cloned repository to ${APP_DIR}"
         return 0
     fi
@@ -1962,7 +2080,7 @@ fetch_bot_source() {
     warn "git clone failed — falling back to source tarball."
     tmp="$(mktemp)"
     tmpdir="$(mktemp -d)"
-    if ! curl_download "$REPO_ARCHIVE_URL" "$tmp"; then
+    if ! curl_download "$archive_url" "$tmp"; then
         rm -f "$tmp"
         rm -rf "$tmpdir"
         explain_network_failure "download bot source archive"
@@ -1974,6 +2092,7 @@ fetch_bot_source() {
     mv "$extracted" "$APP_DIR"
     rm -f "$tmp"
     rm -rf "$tmpdir"
+    set_install_branch "$branch"
     ok "Source extracted to ${APP_DIR}"
 }
 
@@ -2134,7 +2253,8 @@ show_native_install_summary() {
 }
 
 action_install_docker() {
-    info "Starting PasarguardBot Docker installation..."
+    local branch="${1:-main}"
+    info "Starting PasarguardBot Docker installation (branch=${branch})..."
     echo
 
     if is_installed; then
@@ -2143,12 +2263,13 @@ action_install_docker() {
         [[ "${confirm,,}" == "y" ]] || return 0
     fi
 
+    set_install_branch "$branch"
     check_disk_space
     install_docker
     check_required_ports docker
     ensure_config_dirs
-    generate_env_file docker
-    setup_compose
+    generate_env_file docker "$branch"
+    setup_compose "$branch"
     install_manager_command
     cleanup_stale_named_containers
 
@@ -2161,9 +2282,10 @@ action_install_docker() {
 
     wait_for_containers_healthy || true
     set_install_mode docker
+    set_install_branch "$branch"
 
     echo
-    ok "Installation completed successfully (docker)!"
+    ok "Installation completed successfully (docker, branch=${branch})!"
     echo
     info "Paths:"
     echo -e "  ${C_DIM}Config:${C_RESET}  ${CONFIG_DIR}"
@@ -2173,6 +2295,7 @@ action_install_docker() {
     echo
     info "Image:"
     echo -e "  ${C_DIM}Bot:${C_RESET}  ${BOT_IMAGE}:${BOT_IMAGE_TAG} ($(get_installed_bot_version))"
+    echo -e "  ${C_DIM}Branch:${C_RESET}  ${branch}"
     echo
     info "Ports:"
     echo -e "  ${C_DIM}FastAPI:${C_RESET}      ${FASTAPI_PORT_DEFAULT} (public)"
@@ -2188,7 +2311,8 @@ action_install_docker() {
 }
 
 action_install_native() {
-    info "Starting PasarguardBot native installation (no Docker)..."
+    local branch="${1:-main}"
+    info "Starting PasarguardBot native installation (branch=${branch}, no Docker)..."
     echo
     require_native_os
 
@@ -2198,17 +2322,18 @@ action_install_native() {
         [[ "${confirm,,}" == "y" ]] || return 0
     fi
 
+    set_install_branch "$branch"
     check_disk_space
     check_required_ports native
     ensure_config_dirs
     install_native_packages
-    generate_env_file native
+    generate_env_file native "$branch"
     write_native_redis_conf
     write_native_mariadb_conf
     init_native_mariadb_datadir
     install_phpmyadmin_files
     install_uv_binary
-    fetch_bot_source
+    fetch_bot_source 0 "$branch"
     link_native_app_paths
     sync_native_python_deps
     write_native_systemd_units
@@ -2216,12 +2341,15 @@ action_install_native() {
     start_native_services
     wait_for_native_bot || true
     set_install_mode native
+    set_install_branch "$branch"
     show_native_install_summary
+    echo -e "  ${C_DIM}Branch:${C_RESET}  ${branch}"
     pause
 }
 
 # ── Actions ───────────────────────────────────────────────────────────────────
 action_install() {
+    local branch
     draw_banner
     echo -e "${C_BOLD}  Install mode${C_RESET}"
     echo
@@ -2232,10 +2360,31 @@ action_install() {
     read -r -p "Choice: " choice || return 0
 
     case "$choice" in
-        1) action_install_docker ;;
-        2) action_install_native ;;
-        0) info "Cancelled." ;;
-        *) warn "Invalid choice." ; sleep 1 ;;
+        1|2) ;;
+        0)
+            info "Cancelled."
+            return 0
+            ;;
+        *)
+            warn "Invalid choice."
+            sleep 1
+            return 0
+            ;;
+    esac
+
+    echo
+    prompt_repo_branch install || {
+        info "Cancelled."
+        return 0
+    }
+    branch="$SELECTED_REPO_BRANCH"
+    echo
+    info "Selected branch: ${branch}"
+    echo
+
+    case "$choice" in
+        1) action_install_docker "$branch" ;;
+        2) action_install_native "$branch" ;;
     esac
 }
 
@@ -2355,14 +2504,15 @@ action_uninstall() {
 }
 
 action_update_docker() {
-    local old_ver new_ver
+    local old_ver new_ver branch="${1:-main}"
     command -v docker &>/dev/null || die "Docker is not installed."
     docker info &>/dev/null || die "Docker daemon is not running."
 
     old_ver="$(get_installed_bot_version)"
+    set_install_branch "$branch"
 
-    info "Updating production Compose and pulling latest images..."
-    setup_compose
+    info "Updating production Compose from branch '${branch}' and pulling latest images..."
+    setup_compose "$branch"
     pull_images
 
     info "Recreating containers..."
@@ -2374,17 +2524,18 @@ action_update_docker() {
     prune_dangling_images_safe
 
     new_ver="$(get_installed_bot_version)"
-    ok "Update complete (${old_ver} → ${new_ver})."
+    ok "Update complete (${old_ver} → ${new_ver}) [branch=${branch}]."
 }
 
 action_update_native() {
-    local old_ver new_ver
+    local old_ver new_ver branch="${1:-main}"
     require_native_os
     [[ -d "$APP_DIR" ]] || die "Native app directory missing: ${APP_DIR}"
 
     old_ver="$(get_installed_bot_version)"
-    info "Updating bot source and dependencies..."
-    fetch_bot_source 1
+    set_install_branch "$branch"
+    info "Updating bot source from branch '${branch}'..."
+    fetch_bot_source 1 "$branch"
     link_native_app_paths
     sync_native_python_deps
     write_native_systemd_units
@@ -2397,16 +2548,27 @@ action_update_native() {
     wait_for_native_bot || true
 
     new_ver="$(get_installed_bot_version)"
-    ok "Update complete (${old_ver} → ${new_ver})."
+    ok "Update complete (${old_ver} → ${new_ver}) [branch=${branch}]."
 }
 
 action_update() {
+    local branch
     draw_banner
     is_installed || die "Install the bot first (option 1)."
 
+    prompt_repo_branch update || {
+        info "Cancelled."
+        pause
+        return 0
+    }
+    branch="$SELECTED_REPO_BRANCH"
+    echo
+    info "Selected branch: ${branch}"
+    echo
+
     case "$(get_install_mode)" in
-        native) action_update_native ;;
-        docker) action_update_docker ;;
+        native) action_update_native "$branch" ;;
+        docker) action_update_docker "$branch" ;;
         *) die "Unknown install mode. Reinstall or set ${INSTALL_MODE_FILE}." ;;
     esac
     pause
