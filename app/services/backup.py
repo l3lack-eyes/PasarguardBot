@@ -169,7 +169,10 @@ async def run_backup_and_send(*, trigger: str = "auto") -> BackupResult:
     if not destination:
         return BackupResult(
             ok=False,
-            message=("کانال لاگ «🗄 بکاپ ربات» تنظیم نشده است.\nاز مسیر «مدیریت لاگ‌ها» اول کانال بکاپ را ست کنید."),
+            message=(
+                "❌ کانال لاگ بکاپ تنظیم نشده است.\n"
+                "از مسیر «مدیریت لاگ‌ها» کانال «🗄 بکاپ ربات» را ست کنید تا بکاپ ارسال شود."
+            ),
             sent=False,
         )
 
