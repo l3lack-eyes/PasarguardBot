@@ -11,6 +11,8 @@ def btn_cardtocard_settings(settings=None):
         "✅ نمایش رندوم کارت روشن" if settings and settings.manual_card_random_mode else "❌ نمایش رندوم کارت خاموش"
     )
     visibility_text = texts.manual_card_visibility_button_label(settings)
+    require_phone = getattr(settings, "require_phone_for_payment", True) if settings else True
+    require_phone_text = texts.REQUIRE_PHONE_ACTIVE_LABEL if require_phone else texts.REQUIRE_PHONE_INACTIVE_LABEL
     return [
         [
             Button.inline(text="➕ افزودن کارت", data="add_manual_card"),
@@ -20,6 +22,7 @@ def btn_cardtocard_settings(settings=None):
         [Button.inline(text=visibility_text, data="toggle_manual_card_visibility")],
         [Button.inline(text=random_mode_text, data="toggle_manual_card_random_mode")],
         [Button.inline(text=auto_text, data="toggle_manual_auto_confirm")],
+        [Button.inline(text=require_phone_text, data="toggle_require_phone_for_payment")],
         [Button.inline(text="📋 قوانین تایید خودکار", data="maar_rules_menu")],
         [
             Button.inline(text="💰 محدودیت کارت دستی", data="set_manual_limits"),

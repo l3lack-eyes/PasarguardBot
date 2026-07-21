@@ -157,7 +157,11 @@ async def manual_card_prompt_amount(event) -> None:
 
 async def return_to_balance_menu(event) -> None:
     user_id = event.sender_id
+    # Preserve pending_topup_amount so the topup flow can auto-fill it
+    pending_amount = await get_data(user_id, "pending_topup_amount")
     await clear_user(user_id)
+    if pending_amount is not None:
+        await set_data(user_id, "pending_topup_amount", pending_amount)
     settings = await SettingsManager().get_settings()
     info = await UserCRUD().read_user(user_id)
     lang = info.language if info and info.language else "fa"
@@ -915,8 +919,21 @@ async def balance_phone_verify_handler(event: Message):
 
         success = await UserCRUD().update_user(user_id=user_id, number=phone_number)
         if success:
-            await event.respond(texts.PHONE_VERIFY_SUCCESS, buttons=await bhome_buttons(user_id, lang))
-            await set_step(user_id=user_id, step=states.STEP_START)
+            # Check if user came from a purchase flow with a pending topup amount
+            pending_amount = await get_data(user_id, "pending_topup_amount")
+            if pending_amount is not None:
+                # Resume the payment flow: confirm phone saved, then go to card info
+                amount = int(pending_amount)
+                await set_data(user_id, "mablagh", amount)
+                await clear_reply_keyboard(event)
+                await event.respond(
+                    texts.PHONE_VERIFY_SUCCESS,
+                )
+                await manual_card_send_channel_info(event, amount, edit=False)
+                await set_step(user_id=user_id, step=states.STEP_CART_B_CART2)
+            else:
+                await event.respond(texts.PHONE_VERIFY_SUCCESS, buttons=await bhome_buttons(user_id, lang))
+                await set_step(user_id=user_id, step=states.STEP_START)
         else:
             await event.respond(texts.PHONE_VERIFY_UPDATE_ERROR)
             log_message = (

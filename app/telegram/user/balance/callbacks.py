@@ -13,7 +13,7 @@ from app.telegram.keyboards.balance import (
 from app.telegram.shared.guards.callback_guards import notify_session_expired
 from app.telegram.shared.utils.maintenance import bot_is_offline
 from app.telegram.shared.utils.rate_limit import debounce_callback
-from app.telegram.state import get_data, get_step, set_step
+from app.telegram.state import get_data, get_step, set_data, set_step
 from app.telegram.user.balance import states, texts
 from app.telegram.user.balance.messages import (
     _prompt_crypto_amount,
@@ -21,6 +21,7 @@ from app.telegram.user.balance.messages import (
     _require_balance_payment_step,
     manual_card_amount_placeholders,
     manual_card_prompt_amount,
+    manual_card_send_channel_info,
     return_to_balance_menu,
     return_to_home_menu,
 )
@@ -94,11 +95,24 @@ async def manual_card_payment_callback(event: events.CallbackQuery.Event):
         await event.answer(texts.PAYMENT_DISABLED_ALERT, alert=True)
         raise events.StopPropagation
 
-    if user.number:
+    require_phone = getattr(settings, "require_phone_for_payment", True)
+
+    # If phone is required AND user doesn't have one saved, request it first
+    if require_phone and not user.number:
+        await _request_phone_for_balance_payment(event)
+        raise events.StopPropagation
+
+    # Phone is not required OR user already has a phone — proceed to payment
+    pending_amount = await get_data(event.sender_id, "pending_topup_amount")
+    if pending_amount is not None:
+        # Auto-fill: skip amount entry, go directly to card info
+        amount = int(pending_amount)
+        await set_data(event.sender_id, "mablagh", amount)
+        await manual_card_send_channel_info(event, amount, edit=True)
+        await set_step(user_id=event.sender_id, step=states.STEP_CART_B_CART2)
+    else:
         await manual_card_prompt_amount(event)
         await set_step(user_id=event.sender_id, step=states.STEP_CART_B_CART_AMOUNT)
-    else:
-        await _request_phone_for_balance_payment(event)
     raise events.StopPropagation
 
 

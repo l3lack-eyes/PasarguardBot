@@ -2,6 +2,12 @@
 
 GATEWAY_SETTINGS_TRIGGER = "💳 تنظیمات درگاه"
 
+REQUIRE_PHONE_ACTIVE_LABEL = "✅ درخواست شماره تلفن: فعال"
+REQUIRE_PHONE_INACTIVE_LABEL = "❌ درخواست شماره تلفن: غیرفعال"
+REQUIRE_PHONE_STATUS_ACTIVE = "فعال (کاربران باید شماره تلفن ارسال کنند)"
+REQUIRE_PHONE_STATUS_INACTIVE = "غیرفعال (مرحله شماره تلفن حذف شده)"
+
+
 CARD_HOLDER_NOT_SET = "تنظیم نشده"
 CARD_NOT_REGISTERED = "ثبت نشده"
 
@@ -102,6 +108,12 @@ def pay_mode_status(settings) -> str:
     return "❌ غیرفعال"
 
 
+def require_phone_status(settings) -> str:
+    if settings is None or getattr(settings, "require_phone_for_payment", True):
+        return REQUIRE_PHONE_STATUS_ACTIVE
+    return REQUIRE_PHONE_STATUS_INACTIVE
+
+
 def is_manual_card_visible(settings, user) -> bool:
     if not settings or not settings.pay_mode:
         return False
@@ -122,7 +134,8 @@ def gateway_settings_message(manual_info: str, random_mode_status: str, settings
         f"{manual_info}\n"
         f"🔘 **دکمه کارت دستی در ربات**: {pay_mode_status(settings)}\n"
         f"🎲 **حالت نمایش شماره کارت**: {random_mode_status}\n"
-        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}"
+        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}\n"
+        f"📞 **درخواست شماره تلفن**: {require_phone_status(settings)}"
         f"{pay_mode_hint}\n\n"
         "برای تغییر هر گزینه، روی دکمه مربوطه بزنید."
     )
@@ -141,7 +154,8 @@ def gateway_settings_back_message(active, random_mode_status: str, settings) -> 
         f"📄 **شماره کارت**:\n `{active.number if (active and active.number) else CARD_HOLDER_NOT_SET}`\n"
         f"🔘 **دکمه کارت دستی در ربات**: {pay_mode_status(settings)}\n"
         f"🎲 **حالت نمایش شماره کارت**: {random_mode_status}\n"
-        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}"
+        f"👥 **نمایش دکمه کارت به کارت برای**: {manual_card_visibility_status(settings)}\n"
+        f"📞 **درخواست شماره تلفن**: {require_phone_status(settings)}"
         f"{pay_mode_hint}\n\n"
         "برای تغییر هر گزینه، روی دکمه مربوطه بزنید."
     )

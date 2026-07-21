@@ -363,6 +363,8 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
 
     is_sufficient, message = await check_user_balance(event.sender_id, amount)
     if not is_sufficient:
+        # Save the required amount so the topup flow can auto-fill it
+        await set_data(event.sender_id, "pending_topup_amount", amount)
         await event.delete()
         await event.respond("💸", buttons=await bhome_buttons(event.sender_id, "fa"))
         await event.respond(message, buttons=await create_balance_button(event.sender_id))

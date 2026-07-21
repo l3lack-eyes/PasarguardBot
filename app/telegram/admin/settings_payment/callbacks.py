@@ -24,6 +24,7 @@ _SETTINGS_PAYMENT_EXACT_CALLBACKS = frozenset(
         "toggle_manual_auto_confirm",
         "toggle_manual_card_random_mode",
         "toggle_manual_card_visibility",
+        "toggle_require_phone_for_payment",
         "maar_rules_menu",
         "maar_add",
         "set_manual_limits",
@@ -166,6 +167,13 @@ async def callback_settings_payment(event: events.CallbackQuery.Event):
             manual_card_visibility=new_mode,
             pay_mode=True,
         )
+        settings = await SettingsManager().get_settings()
+        await _refresh_gateway_settings_view(event, settings)
+
+    elif data == "toggle_require_phone_for_payment":
+        settings = await SettingsManager().get_settings()
+        current = getattr(settings, "require_phone_for_payment", True)
+        await SettingsManager().update_setting(settings.id, require_phone_for_payment=not current)
         settings = await SettingsManager().get_settings()
         await _refresh_gateway_settings_view(event, settings)
 
