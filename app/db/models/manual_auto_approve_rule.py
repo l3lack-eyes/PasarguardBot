@@ -9,7 +9,9 @@ class ManualAutoApproveRule(Base):
 
     __tablename__ = "manual_auto_approve_rules"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
     min_successful_tx: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     max_successful_tx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     auto_approve_delay_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
