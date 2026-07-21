@@ -667,12 +667,24 @@ async def execute_pending_purchase_if_any(user_id: int) -> bool:
         f"**🔌 محدودیت کاربر :** {ip_limit_text}\n"
     )
 
+    if discount_code:
+        await DiscountCodeManager().update_discount_usage(code=discount_code)
+
     await ServiceCRUD().create_service(
         code=code_service,
-        user_id=user_id,
-        sub_link=primary_subscription_url,
-        name=username,
-        panel_id=panel.code,
+        username=username,
+        enable=1,
+        in_panel=panel.code,
+        panel_userid=getattr(added_user, "id", None),
+        id=user_id,
+        package_size=gigabytes_to_bytes(float(gig)),
+        createtime=Time_Date()["stamp"],
+        expiration_time=day_to_timestamp(int(plan.duration)),
+        data_limit_reset_strategy=plan.data_limit_reset_strategy
+        if plan and hasattr(plan, "data_limit_reset_strategy")
+        else "no_reset",
+        ip_limit=plan.ip_limit if plan and hasattr(plan, "ip_limit") else 0,
+        is_test=False,
     )
     await Kenzo.send_file(
         entity=user_id,
