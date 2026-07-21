@@ -204,8 +204,9 @@ async def manual_card_send_channel_info(event, amount_toman: int, *, edit: bool 
         try:
             await event.client.edit_message(event.chat_id, flow_msg_id, text, buttons=buttons)
             await remember_balance_flow_message(event.sender_id, flow_msg_id)
-            with contextlib.suppress(Exception):
-                await event.delete()
+            if getattr(event, "message_id", None) and event.message_id != flow_msg_id:
+                with contextlib.suppress(Exception):
+                    await event.delete()
         except Exception:
             # Message was deleted or not editable — fall back to sending a new one
             sent = await event.respond(text, buttons=buttons)
