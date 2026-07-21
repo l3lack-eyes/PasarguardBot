@@ -12,7 +12,7 @@ from app.db.crud.keyboards import KeyboardButtonCRUD
 from app.db.crud.settings import SettingsManager
 from app.logger import get_logger
 from app.telegram.admin.settings import states, texts
-from app.telegram.keyboards.common import extract_custom_emoji_document_id
+from app.telegram.keyboards.common import extract_custom_emoji_document_id, is_wizard_step
 from app.telegram.keyboards.customization import (
     create_keyboard_button_config_view,
     create_keyboard_buttons_admin_buttons,
@@ -34,9 +34,11 @@ logger = get_logger(__name__)
 async def message_handler_settings(event: Message):
     if not event.is_private:
         return
-    if await get_step(event.sender_id) != states.PANEL_STEP:
+    step = await get_step(event.sender_id)
+    if is_wizard_step(step):
         return
 
+    await set_step(event.sender_id, states.PANEL_STEP)
     logger.info("message_handler_settings")
     settings = await SettingsManager().get_settings()
     buttons = await create_buttons_settings(settings)

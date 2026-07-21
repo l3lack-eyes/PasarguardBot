@@ -11,6 +11,7 @@ from app.db.crud.keyboards import KeyboardButtonCRUD
 from app.db.crud.settings import SettingsManager
 from app.logger import get_logger
 from app.telegram.admin.settings import keyboards, states, texts
+from app.telegram.keyboards.common import is_wizard_step
 from app.telegram.keyboards.customization import (
     create_keyboard_button_config_view,
     create_keyboard_buttons_admin_buttons,
@@ -57,8 +58,10 @@ def settings_callback_filter(event: events.CallbackQuery.Event) -> bool:
 
 
 async def callback_settings_menu_page(event: events.CallbackQuery.Event):
-    if await get_step(event.sender_id) != states.PANEL_STEP:
+    step = await get_step(event.sender_id)
+    if is_wizard_step(step):
         return
+    await set_step(event.sender_id, states.PANEL_STEP)
 
     data = event.data.decode("utf-8")
     section_key = None if data in {"settings_menu", "settings_menu:home"} else data.removeprefix("settings_menu:")
@@ -71,8 +74,10 @@ async def callback_settings_menu_page(event: events.CallbackQuery.Event):
 
 
 async def callback_settings_toggle(event: events.CallbackQuery.Event):
-    if await get_step(event.sender_id) != states.PANEL_STEP:
+    step = await get_step(event.sender_id)
+    if is_wizard_step(step):
         return
+    await set_step(event.sender_id, states.PANEL_STEP)
 
     data = event.data.decode("utf-8")
     setting_name = data.removeprefix("settings.")
