@@ -153,11 +153,14 @@ async def manual_card_prompt_amount(event) -> None:
 
 async def return_to_balance_menu(event) -> None:
     user_id = event.sender_id
-    # Preserve pending_topup_amount so the topup flow can auto-fill it
+    # Preserve pending_topup_amount and pending_purchase_context so the topup flow can auto-fill and auto-deliver
     pending_amount = await get_data(user_id, "pending_topup_amount")
+    pending_ctx = await get_data(user_id, "pending_purchase_context")
     await clear_user(user_id)
     if pending_amount is not None:
         await set_data(user_id, "pending_topup_amount", pending_amount)
+    if pending_ctx is not None:
+        await set_data(user_id, "pending_purchase_context", pending_ctx)
     settings = await SettingsManager().get_settings()
     info = await UserCRUD().read_user(user_id)
     lang = info.language if info and info.language else "fa"
