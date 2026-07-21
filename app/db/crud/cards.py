@@ -3,7 +3,6 @@ from sqlalchemy.future import select
 
 from app.db.base import AsyncSessionLocal as Session
 from app.db.models.manual_card import ManualCard
-from app.db.models.settings import Settings
 
 
 class ManualCardManager:
@@ -11,20 +10,12 @@ class ManualCardManager:
         async with Session() as session:
             try:
                 if active:
-                    await session.execute(select(ManualCard))
-                new_card = ManualCard(number=number, name=name, active=active)
-                if active:
                     result = await session.execute(select(ManualCard))
                     for card in result.scalars().all():
                         card.active = False
+                new_card = ManualCard(number=number, name=name, active=active)
                 session.add(new_card)
                 await session.commit()
-                if active:
-                    settings = (await session.execute(select(Settings))).scalars().first()
-                    if settings:
-                        settings.cart1_num = number
-                        settings.cart1_name = name
-                        await session.commit()
                 return new_card
             except SQLAlchemyError:
                 await session.rollback()
@@ -51,11 +42,6 @@ class ManualCardManager:
                     card.active = True
                 else:
                     card.active = False
-            if target:
-                settings = (await session.execute(select(Settings))).scalars().first()
-                if settings:
-                    settings.cart1_num = target.number
-                    settings.cart1_name = target.name
             await session.commit()
             return target
 
