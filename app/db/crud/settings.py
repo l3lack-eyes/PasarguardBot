@@ -61,6 +61,7 @@ class SettingsManager:
                         reseller_sale_mode=False,
                         reseller_min_wallet_balance=100000,
                         backup_interval_hours=24,
+                        require_phone_for_payment=True,
                     )
                     session.add(default_settings)
                     await session.commit()

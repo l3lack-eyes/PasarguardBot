@@ -67,9 +67,7 @@ def _resolve_dump_binary() -> str:
     ):
         if Path(path).is_file() and os.access(path, os.X_OK):
             return path
-    raise FileNotFoundError(
-        "mariadb-dump/mysqldump not found. On native installs, install the mariadb-client package."
-    )
+    raise FileNotFoundError("mariadb-dump/mysqldump not found. On native installs, install the mariadb-client package.")
 
 
 def _write_sql_file(sql_path: Path, data: bytes) -> None:

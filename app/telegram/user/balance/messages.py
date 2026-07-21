@@ -205,10 +205,15 @@ async def manual_card_send_channel_info(event, amount_toman: int, *, edit: bool 
     buttons = await keyboards.manual_card_channel_info_rows()
     flow_msg_id = await get_balance_flow_message_id(event.sender_id, event)
     if flow_msg_id:
-        await event.client.edit_message(event.chat_id, flow_msg_id, text, buttons=buttons)
-        await remember_balance_flow_message(event.sender_id, flow_msg_id)
-        with contextlib.suppress(Exception):
-            await event.delete()
+        try:
+            await event.client.edit_message(event.chat_id, flow_msg_id, text, buttons=buttons)
+            await remember_balance_flow_message(event.sender_id, flow_msg_id)
+            with contextlib.suppress(Exception):
+                await event.delete()
+        except Exception:
+            # Message was deleted or not editable — fall back to sending a new one
+            sent = await event.respond(text, buttons=buttons)
+            await remember_balance_flow_message(event.sender_id, sent.id)
     elif edit:
         await event.edit(text, buttons=buttons)
     else:
@@ -238,6 +243,9 @@ async def _require_balance_payment_step(event) -> bool:
 
 async def _request_phone_for_balance_payment(event) -> None:
     await event.delete()
+    # The balance menu message was just deleted — clear the stored message ID so
+    # manual_card_send_channel_info doesn't try to edit a non-existent message later.
+    await set_data(event.sender_id, states.BALANCE_FLOW_MSG_STEP, "")
     await event.respond(texts.PHONE_VERIFY_PROMPT, buttons=keyboards.phone_verify_button())
     await set_step(user_id=event.sender_id, step=states.STEP_CONF_NUMBER)
 
