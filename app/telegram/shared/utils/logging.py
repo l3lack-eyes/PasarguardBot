@@ -23,7 +23,7 @@ async def send_log_message(log_type: str | LogType, **kwargs):
     if hasattr(log_type, "value"):
         log_type = log_type.value
 
-    from config import ADMIN_ID, LOG_CHANNEL
+    from config import LOG_CHANNEL
 
     try:
         from app.db.crud.log_channels import LogChannelManager
@@ -39,8 +39,6 @@ async def send_log_message(log_type: str | LogType, **kwargs):
                 kwargs["reply_to"] = int(topic_id)
         elif LOG_CHANNEL is not None:
             kwargs["entity"] = LOG_CHANNEL
-        elif ADMIN_ID and len(ADMIN_ID) > 0:
-            kwargs["entity"] = ADMIN_ID[0]
         else:
             logger.debug("Log channel not configured; skipping %s", log_type)
             return None
@@ -49,11 +47,10 @@ async def send_log_message(log_type: str | LogType, **kwargs):
 
     except Exception as e:
         logger.error("Error sending log message for %s: %s", log_type, e)
-        fallback_entity = LOG_CHANNEL if LOG_CHANNEL is not None else (ADMIN_ID[0] if ADMIN_ID and len(ADMIN_ID) > 0 else None)
-        if fallback_entity is None:
+        if LOG_CHANNEL is None:
             return None
         try:
-            kwargs["entity"] = fallback_entity
+            kwargs["entity"] = LOG_CHANNEL
             return await _send_to_entity(**kwargs)
         except Exception as fallback_error:
             logger.error("Error in fallback log sending: %s", fallback_error)
