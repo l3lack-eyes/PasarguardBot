@@ -63,8 +63,7 @@ async def buy_service_handler(event: Message):
     panel_manager = PanelsManager()
     panels = await panel_manager.get_available_panels()
 
-    remove_keyboard_msg = await event.respond("⏳", buttons=Button.clear())
-    await remove_keyboard_msg.delete()
+
 
     if setting and setting.single_panel_buy_mode and len(panels) == 1:
         await set_step(user_id, "selectService")

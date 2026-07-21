@@ -125,11 +125,7 @@ async def get_balance_flow_message_id(user_id: int, event) -> int | None:
 
 
 async def clear_reply_keyboard(event) -> None:
-    try:
-        clear_msg = await event.respond("⏳", buttons=Button.clear())
-        await clear_msg.delete()
-    except Exception:
-        pass
+    pass
 
 
 async def respond_after_clearing_keyboard(event, text: str, *, buttons=None, parse_mode=None):
@@ -933,9 +929,9 @@ async def balance_phone_verify_handler(event: Message):
                 # Resume the payment flow: confirm phone saved, then go to card info
                 amount = int(pending_amount)
                 await set_data(user_id, "mablagh", amount)
-                await clear_reply_keyboard(event)
                 await event.respond(
                     texts.PHONE_VERIFY_SUCCESS,
+                    buttons=Button.clear(),
                 )
                 await manual_card_send_channel_info(event, amount, edit=False)
                 await set_step(user_id=user_id, step=states.STEP_CART_B_CART2)
