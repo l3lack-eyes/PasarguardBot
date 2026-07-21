@@ -69,5 +69,8 @@ class ManualCardProcessor(BasePaymentProcessor):
                         log_text,
                         buttons=[[Button.inline(text="🌟 تراکنش به صورت خودکار تایید شد", data="no_action")]],
                     )
+                from app.telegram.user.shop.helpers import execute_pending_purchase_if_any
+
+                await execute_pending_purchase_if_any(int(tx.user_id))
             except Exception:
                 pass

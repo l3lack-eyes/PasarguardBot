@@ -303,6 +303,9 @@ async def callback_transaction_review(event: events.CallbackQuery.Event):
             ),
             buttons=keyboards.no_action_balance_button(result["new_balance"]),
         )
+        from app.telegram.user.shop.helpers import execute_pending_purchase_if_any
+
+        await execute_pending_purchase_if_any(int(tx.user_id))
 
     elif data.startswith("reject_transaction"):
         tx_id = int(data.split(":")[1])

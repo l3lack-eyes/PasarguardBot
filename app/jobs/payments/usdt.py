@@ -288,6 +288,10 @@ async def _process_payment_confirmation(payment, settings, transaction, address_
         ],
     )
 
+    from app.telegram.user.shop.helpers import execute_pending_purchase_if_any
+
+    await execute_pending_purchase_if_any(payment.user_id)
+
 
 class USDTProcessor(BasePaymentProcessor):
     def __init__(self):

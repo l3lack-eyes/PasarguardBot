@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import random
 import time
 
@@ -49,7 +51,7 @@ from app.telegram.shared.utils.username import (
     handle_buy_username_conflict,
     is_panel_username_conflict,
 )
-from app.telegram.state import clear_user, get_data, set_data, set_step
+from app.telegram.state import clear_user, delete_data, get_data, set_data, set_step
 from app.telegram.user.shop import states
 from app.utils.formatting.conversions import convert_storage, day_to_timestamp, gigabytes_to_bytes
 from app.utils.formatting.dates import Time_Date
@@ -365,6 +367,16 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
     if not is_sufficient:
         # Save the required amount so the topup flow can auto-fill it
         await set_data(event.sender_id, "pending_topup_amount", amount)
+        username = await get_data(event.sender_id, "username")
+        pending_context = {
+            "amount": amount,
+            "discount_code": discount_code,
+            "plan_id": plan.id,
+            "panel_code": panel_code,
+            "gig": gig,
+            "username": username,
+        }
+        await set_data(event.sender_id, "pending_purchase_context", pending_context)
         await event.delete()
         await event.respond("💸", buttons=await bhome_buttons(event.sender_id, "fa"))
         await event.respond(message, buttons=await create_balance_button(event.sender_id))
@@ -525,3 +537,154 @@ async def _complete_vpn_purchase(event, *, amount: int, discount_code: str | Non
         ),
         buttons=purchase_buttons,
     )
+
+
+async def execute_pending_purchase_if_any(user_id: int) -> bool:
+    """Check if the user has a pending purchase context and sufficient balance.
+    If so, automatically create the account, deduct funds, and deliver the config to the user.
+    """
+    ctx = await get_data(user_id, "pending_purchase_context")
+    if not ctx or not isinstance(ctx, dict):
+        return False
+
+    amount = int(ctx.get("amount", 0))
+    if amount <= 0:
+        return False
+
+    is_sufficient, _ = await check_user_balance(user_id, amount)
+    if not is_sufficient:
+        return False
+
+    plan_id = ctx.get("plan_id")
+    panel_code = ctx.get("panel_code")
+    gig = ctx.get("gig")
+    username = ctx.get("username")
+    discount_code = ctx.get("discount_code")
+
+    plan = await PlanManager().get_plan(plan_id)
+    panel = await PanelsManager().get_panel_by_code(code=panel_code) if panel_code else None
+
+    if not plan or not panel or not gig or not username:
+        await delete_data(user_id, "pending_purchase_context")
+        await delete_data(user_id, "pending_topup_amount")
+        return False
+
+    code_service = random.randint(10000, 9999999)
+    try:
+        groups_resp = await fetch_panel_groups_with_auth(panel)
+        group_ids = resolve_panel_group_ids(panel, groups_resp)
+
+        reset_strategy = UserDataLimitResetStrategy.NO_RESET
+        if plan.plan_type in ["fair_usage", "fair"] and plan.data_limit_reset_strategy:
+            reset_strategy = UserDataLimitResetStrategy(plan.data_limit_reset_strategy)
+
+        start_time = time.time()
+        ip_limit = getattr(plan, "ip_limit", 0) or 0
+        new_user = UserCreate(
+            username=username,
+            group_ids=group_ids,
+            data_limit=gigabytes_to_bytes(float(gig)),
+            expire=day_to_timestamp(int(plan.duration)),
+            note=f"{user_id}",
+            data_limit_reset_strategy=reset_strategy,
+            hwid_limit=ip_limit if ip_limit > 0 else None,
+        )
+        added_user = await PasarguardAPI(panel.base_url).add_user(user=new_user, token=panel.cookie)
+    except Exception as e:
+        logger.error("Auto-delivery failed for user %s: %s", user_id, e)
+        return False
+
+    creation_time = time.time() - start_time
+    creation_time_text = f"{creation_time * 1000:.0f}" if creation_time < 1 else f"{creation_time:.2f}"
+    creation_time_unit = "میلی‌ثانیه" if creation_time < 1 else "ثانیه"
+
+    subscription_url = added_user.subscription_url
+    subscription_url = (
+        subscription_url if subscription_url.startswith("http") else f"{panel.base_url}{subscription_url}"
+    )
+    subscription_links_text, primary_subscription_url = format_subscription_links_for_message(
+        panel,
+        subscription_url,
+        main_label="🔗 لینک سابسکریپشن",
+        tunnel_label="🌐 لینک تانل سابسکریپشن",
+    )
+    single_config_links_text = await get_selected_single_config_links_text(panel, getattr(added_user, "id", None))
+    single_config_links_section = (
+        f"**🔗 لینک‌های تکی انتخاب‌شده:**\n{single_config_links_text}" if single_config_links_text else ""
+    )
+    qr_file = create_qr_code(text=f"{primary_subscription_url}", filename=f"{code_service}.png")
+
+    new_amount = await update_Money(user_id=user_id, Money=-int(amount))
+    ip_limit_text = format_ip_limit(getattr(plan, "ip_limit", 0))
+    volume_text = convert_storage(
+        float(gig), getattr(plan, "plan_type", None), getattr(plan, "data_limit_reset_strategy", None)
+    )
+
+    txt_template = await get_bot_text(
+        key="config_purchase_success_message",
+        default=(
+            "**🎉 کانفیگ اختصاصی V2Ray شما در عرض فقط {creation_time} توسط ربات ساخته شد . !**\n"
+            "**#️⃣ کد سرویس(در ربات):** `{service_code}`\n"
+            "**🔷 اسم کانفیگ:** `{account_name}`\n"
+            "**📥 حجم انتخابی :** {volume}\n"
+            "**⏰ مدت زمان :** {duration} روز\n"
+            "**🔌 محدودیت کاربر :** {user_limit}\n\n"
+            "**🌏 لینک سابسکریپشن آیپی‌ثابت + مولتی‌لوکیشن (یکجا) :**\n"
+            "{subscription_url}\n\n"
+            "{config_links_with_txt}\n\n"
+            "💵 مبلغ `{amount_deducted}` تومان از موجودی **کیف‌ پول** شما کسر شد.\n"
+            "💰 موجودی جدید **کیف‌ پول** شما:  `{new_balance}` تومان\n\n"
+            "🚦جهت راهنمای اتصال اندروید/ویندوز/مک/آیفون/تلویزیون به بخش راهنمای ربات /help بروید."
+        ),
+        lang="fa",
+    )
+    txt = (
+        txt_template.replace("{service_code}", str(code_service))
+        .replace("{account_name}", username)
+        .replace("{volume}", volume_text)
+        .replace("{duration}", str(plan.duration))
+        .replace("{user_limit}", ip_limit_text)
+        .replace("{price}", f"{int(amount):,}")
+        .replace("{subscription_url}", subscription_links_text)
+        .replace("{config_links}", single_config_links_text)
+        .replace("{config_links_with_txt}", single_config_links_section)
+        .replace("{amount_deducted}", f"{int(amount):,}")
+        .replace("{new_balance}", f"{new_amount:,}")
+        .replace("{creation_time}", f"{creation_time_text} {creation_time_unit}")
+    )
+
+    log_title = "خرید جدید باکدتخفیف" if discount_code else " خرید جدید بدون کدتخفیف"
+    discount_line = f"🎫 کد تخفیف: `{discount_code}`\n" if discount_code else ""
+    log_text = (
+        f"📢 **{log_title}**\n\n"
+        f"👤 شناسه کاربر: `{user_id}`\n"
+        f"📅 تاریخ خرید (میلادی): `{Time_Date()['mf']}`\n"
+        f"📅 تاریخ خرید (شمسی): `{Time_Date()['jf']}`\n"
+        f"🎫 کد سرویس: `{code_service}`\n"
+        f"**🔷 اسم کانفیگ:** `{username}`\n"
+        f"{discount_line}"
+        f"📏 حجم خریداری شده: {volume_text}\n"
+        f"**🔌 محدودیت کاربر :** {ip_limit_text}\n"
+    )
+
+    await ServiceCRUD().create_service(
+        code=code_service,
+        user_id=user_id,
+        sub_link=primary_subscription_url,
+        name=username,
+        panel_id=panel.code,
+    )
+    await Kenzo.send_file(
+        entity=user_id,
+        file=qr_file,
+        caption=txt,
+        buttons=await bhome_buttons(user_id, "fa"),
+    )
+    with contextlib.suppress(Exception):
+        os.remove(qr_file)
+
+    await send_log_message(LogType.OTHER, message=log_text)
+    await delete_data(user_id, "pending_purchase_context")
+    await delete_data(user_id, "pending_topup_amount")
+    return True
+
